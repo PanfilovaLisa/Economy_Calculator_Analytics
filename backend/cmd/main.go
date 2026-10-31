@@ -2,40 +2,24 @@ package main
 
 import (
 	"analytics/configs"
-	"analytics/internal/calc"
+	"analytics/internal/cashflow"
 	"fmt"
-	"log"
 	"net/http"
 )
-
-type Responce struct {
-	StatusCode int
-}
 
 func main() {
 	conf := configs.LoadConfig()
 	if conf == nil {
-		log.Fatalln("config is nil")
-		return
+		panic("config is nil")
 	}
-	// db := db.NewDb(conf) // db
-	// if conf == nil {
-	// 	log.Fatalln("db is nil")
-	// 	return
-	// }
+
 	router := http.NewServeMux()
 
-	// Repositories
+	cashFlowService := cashflow.NewCashFlowService(conf)
 
-	// Services
-	calcService := calc.NewCalcService(calc.CalcServiceDeps{
-		Config: conf,
-	})
-
-	// Handlers
-	calc.NewCalcHandler(router, calc.CalcHandlerDeps{
-		CalcService: calcService,
-		Config:      conf,
+	cashflow.NewCashFlowHandler(router, cashflow.CashFlowHandlerDeps{
+		CashFlowService: cashFlowService,
+		Config:          conf,
 	})
 
 	server := http.Server{
@@ -44,5 +28,9 @@ func main() {
 	}
 
 	fmt.Println("Сервер запущен на порте 8082")
-	server.ListenAndServe()
+	
+	err := server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		fmt.Printf("ОШИБКА ЗАПУСКА СЕРВЕРА: %v\n", err)
+	}
 }
