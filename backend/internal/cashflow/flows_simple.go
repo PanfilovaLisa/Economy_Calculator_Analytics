@@ -54,7 +54,7 @@ func generateSimpleFlows(deal Deal, ctx flowContext) []CashFlow {
 func generateManualFlows(deal Deal, ctx flowContext, principalSched []scheduleItem) []CashFlow {
 	var cfs []CashFlow
 	remaining := ctx.Remaining
-	from := ctx.StartDate
+	from := ctx.AccrualStart
 
 	for i, item := range principalSched {
 		payDate := item.Date

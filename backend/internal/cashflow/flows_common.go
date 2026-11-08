@@ -8,6 +8,7 @@ import (
 
 type flowContext struct {
     StartDate     time.Time
+	AccrualStart  time.Time //дата начала процентного периода
     Maturity      time.Time
     Report        time.Time
     Now           time.Time
@@ -56,6 +57,7 @@ func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, boo
 
 	ctx := flowContext{
         StartDate:     start,
+		AccrualStart:  computeAccrualStart(deal, start),
         Maturity:      deal.MaturityDate,
         Report:        deal.ReportDate,
         Now:           time.Now(),
@@ -175,4 +177,64 @@ func hasManualPrincipal(items []scheduleItem) bool {
 		}
 	}
 	return false
+}
+
+// computeAccrualStart — дата начала первого процентного периода.
+// Для ANN/RGM — предыдущая плановая дата тела (RegularPayPeriod),
+// для SIMPLE без ручного графика — предыдущая плановая дата процентов.
+// Если предыдущей даты нет — fallback на дату начала сделки.
+func computeAccrualStart(deal Deal, start time.Time) time.Time {
+    var prev time.Time
+    switch deal.Discriminator {
+    case DiscANN, DiscRGM:
+        prev = previousFromRule(deal.RegularPayStart, deal.MaturityDate,
+            deal.ReportDate, deal.RegularPayPeriod, deal.RegularPayDayNum)
+        if prev.IsZero() {
+            prev = previousFromRule(deal.InterestPayStart, deal.MaturityDate,
+                deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
+        }
+    case DiscSIMPLE:
+        if len(parseManualSchedule(deal.ManualPrincipalPayment)) > 0 {
+            // Ручной график тела: сохраняем текущее поведение,
+            // т.к. корректный учёт процентов по interest-правилу
+            // требует отдельного рефакторинга.
+            return start
+        }
+        prev = previousFromRule(deal.InterestPayStart, deal.MaturityDate,
+            deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
+    }
+    if prev.IsZero() || (!deal.DealDate.IsZero() && prev.Before(deal.DealDate)) {
+        prev = deal.DealDate
+    }
+    if prev.IsZero() {
+        prev = start
+    }
+    return prev
+}
+
+// previousFromRule — последняя плановая дата <= before, вычисленная по правилу.
+// Возвращает zero time.Time, если правило пустое или предыдущих дат нет.
+func previousFromRule(ruleStart *time.Time, maturity, before time.Time,
+    period string, dayNum *int) time.Time {
+    if ruleStart == nil || period == "" || period == "ENDDATE" {
+        return time.Time{}
+    }
+    anchor, ok := getAnchor(dayNum, ruleStart)
+    if !ok || !ruleStart.Before(before) {
+        return time.Time{}
+    }
+    cur := *ruleStart
+    result := cur
+    for {
+        next := nextDate(cur, period, anchor)
+        if !next.After(cur) {
+            break
+        }
+        if next.After(before) || next.After(maturity) {
+            break
+        }
+        result = next
+        cur = next
+    }
+    return result
 }

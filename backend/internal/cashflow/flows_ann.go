@@ -17,7 +17,7 @@ func generateAnnuityFlows(deal Deal, ctx flowContext) []CashFlow {
 
 	var cfs []CashFlow
 	remaining := ctx.Remaining
-	from := ctx.StartDate
+	from := ctx.AccrualStart
 
 	for i, payDate := range payDates {
 		yearFrac := YearFraction(from, payDate, ctx.DayConvention)
