@@ -15,7 +15,7 @@ func generateSimpleFlows(deal Deal, ctx flowContext) []CashFlow {
 	// Тело в конце: все даты процентов, тело только на последней.
 	var cfs []CashFlow
 	remaining := ctx.Remaining
-	from := ctx.StartDate
+	from := ctx.AccrualStart
 	dates := sched.InterestDates
 	if len(dates) == 0 {
 		dates = []time.Time{ctx.Maturity}
@@ -25,26 +25,27 @@ func generateSimpleFlows(deal Deal, ctx flowContext) []CashFlow {
 		isLast := i == len(dates)-1
 		yearFrac := YearFraction(from, payDate, ctx.DayConvention)
 		rate := ctx.RateAt(from)
-		interest := roundMoney(remaining * rate * yearFrac)
+		interest := remaining * rate * yearFrac
 
 		var principal float64
 		if isLast {
 			principal = remaining
 		}
 		balanceBefore := remaining
-		remaining = roundMoney(remaining - principal)
+		remaining = remaining - principal
 
 		if interest != 0 {
-			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, interest, balanceBefore))
+			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, roundMoney(interest), balanceBefore))
 		}
 		if principal != 0 {
-			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
+			if isLast {
+				cfs = append(cfs, emitClose(deal, ctx, from, payDate, principal, remaining))
+			} else {
+				cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
+			}
 		}
-
 		from = payDate
-		if remaining <= 0 {
-			break
-		}
+		if remaining <= 0 { break }
 	}
 	return cfs
 }
