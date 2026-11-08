@@ -29,8 +29,9 @@ func SaveToCSV(flows []CashFlow, outputDir string) error {
 	defer writer.Flush()
 
 	headers := []string{
-		"load_dttm", "source_cd", "deal_id", "currency_cd", 
-		"start_dttm", "payment_dttm", "days_to_payment", "time_bucket", 
+		"load_dttm", "source_cd", "discriminator", "deal_id", "currency_cd",
+		"report_dttm",
+		"start_dttm", "payment_dttm", "days_to_payment", "time_bucket",
 		"payment_type", "principal_amt", "interest_amt", "remaining_balance",
 	}
 	if err := writer.Write(headers); err != nil {
@@ -39,19 +40,21 @@ func SaveToCSV(flows []CashFlow, outputDir string) error {
 
 	for _, cf := range flows {
 		record := []string{
-			cf.LoadDate.Format("2006-01-02 15:04:05"),
-			cf.SourceCode,
-			fmt.Sprintf("%d", cf.DealID),
-			cf.Currency,
-			cf.StartDate.Format("02.01.2006"),
-			cf.PaymentDate.Format("02.01.2006"),
-			fmt.Sprintf("%d", cf.DaysToPayment),
-			cf.TimeBucket,
-			cf.PaymentType,
-			fmt.Sprintf("%.2f", cf.PrincipalAmount),
-			fmt.Sprintf("%.2f", cf.InterestAmount),
-			fmt.Sprintf("%.2f", cf.RemainingBalance),
-		}
+		cf.LoadDate.Format("2006-01-02 15:04:05"),
+		cf.SourceCode,
+		cf.Discriminator,
+		fmt.Sprintf("%d", cf.DealID),
+		cf.Currency,
+		cf.ReportDate.Format("02.01.2006"),
+		cf.StartDate.Format("02.01.2006"),
+		cf.PaymentDate.Format("02.01.2006"),
+		fmt.Sprintf("%d", cf.DaysToPayment),
+		cf.TimeBucket,
+		cf.PaymentType,
+		fmt.Sprintf("%.2f", cf.PrincipalAmount),
+		fmt.Sprintf("%.2f", cf.InterestAmount),
+		fmt.Sprintf("%.2f", cf.RemainingBalance),
+	}
 		if err := writer.Write(record); err != nil {
 			return err
 		}

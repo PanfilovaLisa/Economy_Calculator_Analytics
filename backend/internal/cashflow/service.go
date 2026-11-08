@@ -1,21 +1,24 @@
 package cashflow
 
 import (
-	"math"
-    "time"
     "analytics/configs"
 )
 
 type CashFlowService struct {
-    Config *configs.Config
+    Config  *configs.Config
+    Indices map[string]indexSeries
 }
 
 func NewCashFlowService(conf *configs.Config) *CashFlowService {
-    return &CashFlowService{Config: conf}
+    return &CashFlowService{
+        Config:  conf,
+        Indices: loadIndices("./data"),   // путь к папке с cbkey.txt
+    }
 }
 
-func GenerateCashFlows(deal Deal) []CashFlow {
-	ctx, ok := prepareContext(deal)
+// GenerateCashFlows — метод сервиса, чтобы иметь доступ к Indices.
+func (s *CashFlowService) GenerateCashFlows(deal Deal) []CashFlow {
+    ctx, ok := prepareContext(deal, s.Indices)
     if !ok {
         return nil
     }

@@ -47,10 +47,11 @@ func ReadDeals(file io.Reader) ([]Deal, error) {
 			return nil, fmt.Errorf("ошибка чтения строки: %w", err)
 		}
 
-		// Пропускаем пустые строки
-		if len(record) < 2 {
-			continue
-		}
+		if len(record) != len(headers) {
+		log.Printf("ВНИМАНИЕ: строка %d: len(record)=%d != len(headers)=%d, пропуск",
+			len(deals)+1, len(record), len(headers))
+		continue
+	}
 
 		// Заполняем структуру Deal
 		deal := Deal{

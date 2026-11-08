@@ -52,7 +52,7 @@ func (handler *CashFlowHandler) Calculate() http.HandlerFunc {
 		// Генерируем денежные потоки
 		var allCashFlows []CashFlow
 		for _, deal := range deals {
-			flows := GenerateCashFlows(deal)
+			flows := handler.CashFlowService.GenerateCashFlows(deal)
 			allCashFlows = append(allCashFlows, flows...)
 		}
 

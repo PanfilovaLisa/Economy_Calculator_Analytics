@@ -98,5 +98,5 @@ type CashFlow struct {
 
 	PrincipalAmount  float64 `json:"principal_amt"`    // сумма тела (со знаком: + кредит, − депозит)
 	InterestAmount   float64 `json:"interest_amt"`     // сумма процентов (со знаком)
-	RemainingBalance float64 `json:"remaining_balance"` // остаток после платежа (со знаком)
+	RemainingBalance float64 `json:"remaining_balance"` // остаток на момент события (для interest — до тела, для principal — после), со знаком
 }

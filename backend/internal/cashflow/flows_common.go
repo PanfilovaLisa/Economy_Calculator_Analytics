@@ -7,18 +7,16 @@ import (
 )
 
 type flowContext struct {
-	StartDate     time.Time //дата, когда начали платить
-	Maturity      time.Time //дата, когда закончим платить (реализация поведенческой модели не MVP)
-	Report        time.Time //дата отчета
-	Now           time.Time
-	Remaining     float64 // положительная оставшаяся сумма
-	DayConvention string
-
-	isDeposit     bool //приватное
-
-	// RateAt заполняется позже в GenerateCashFlows после buildSchedules
-	// Для MVP — замыкание; см. makeRateAt
-	RateAt func(time.Time) float64
+    StartDate     time.Time
+    Maturity      time.Time
+    Report        time.Time
+    Now           time.Time
+    Remaining     float64
+    DayConvention string
+    isDeposit     bool
+    RateAt        func(time.Time) float64
+    schedules     schedules
+    Indices       map[string]indexSeries
 }
 
 func (ctx flowContext) IsDeposit() bool { return ctx.isDeposit }
@@ -32,8 +30,7 @@ func (ctx flowContext) Signed(x float64) float64 {
 
 // prepareContext — валидирует сделку и приводит поля к удобному виду
 // Возвращает false, если сделку считать нельзя.
-func prepareContext(deal Deal) (flowContext, bool) {
-	//проверки остаток не ноль, отчёт раньше maturity
+func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, bool) {
 	if deal.CurrentPrincipalAmt == 0 {
 		return flowContext{}, false
 	}
@@ -44,27 +41,20 @@ func prepareContext(deal Deal) (flowContext, bool) {
 		return flowContext{}, false
 	}
 
-	// Знак и депозит.
 	isDeposit := deal.CurrentPrincipalAmt < 0
-
-	// Остаток по модулю
 	remaining := math.Abs(deal.CurrentPrincipalAmt)
 
-	// Старт: позже из report_dttm и deal_dttm.
 	start := deal.ReportDate
 	if !deal.DealDate.IsZero() && deal.DealDate.After(start) {
 		start = deal.DealDate
 	}
-
-	// Старт должен быть строго раньше maturity.
 	if !start.Before(deal.MaturityDate) {
 		return flowContext{}, false
 	}
 
-	// DayConvention с fallback
 	conv := normalizeDayConvention(deal.DayConvention)
 
-	return flowContext{
+	ctx := flowContext{
         StartDate:     start,
         Maturity:      deal.MaturityDate,
         Report:        deal.ReportDate,
@@ -72,7 +62,16 @@ func prepareContext(deal Deal) (flowContext, bool) {
         Remaining:     remaining,
         DayConvention: conv,
         isDeposit:     isDeposit,
-    }, true
+        Indices:       indices,
+    }
+
+	sched, err := buildSchedules(deal, ctx)
+	if err != nil {
+		return flowContext{}, false
+	}
+	ctx.RateAt = makeRateAt(deal, sched, ctx.Indices)
+	ctx.schedules = sched
+	return ctx, true
 }
 
 // normalizeDayConvention приводит значение к канону и подставляет fallback
@@ -142,4 +141,38 @@ func emitInterest(deal Deal, ctx flowContext, from, to time.Time, interest, bala
 		InterestAmount:   roundMoney(ctx.Signed(interest)),
 		RemainingBalance: roundMoney(ctx.Signed(balanceBefore)),
 	}
+}
+
+// pickPeriod — периодичность тела; fallback на проценты; fallback на "1M".
+func pickPeriod(deal Deal) string {
+	if p := deal.RegularPayPeriod; p != "" {
+		return p
+	}
+	if p := deal.InterestPayPeriod; p != "" {
+		return p
+	}
+	return "1M"
+}
+
+// principalDatesWithFallback — даты тела; если пусто — [maturity].
+func principalDatesWithFallback(items []scheduleItem, maturity time.Time) []time.Time {
+	if len(items) == 0 {
+		return []time.Time{maturity}
+	}
+	out := make([]time.Time, len(items))
+	for i, it := range items {
+		out[i] = it.Date
+	}
+	return out
+}
+
+// hasManualPrincipal — были ли в расписании непустые суммы
+// (признак, что это ручной график, а не правило с Value=0).
+func hasManualPrincipal(items []scheduleItem) bool {
+	for _, it := range items {
+		if it.Value > 0 {
+			return true
+		}
+	}
+	return false
 }

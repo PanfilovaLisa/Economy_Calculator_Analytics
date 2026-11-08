@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"strconv"
 )
 
 // daysBetween - целое число календарных дней от a до b
@@ -80,4 +81,134 @@ func actActISDA(start, end time.Time) float64 {
 	sum += float64(daysBetween(startOfY2, end)) / div2
 
 	return sum
+}
+
+// effectiveRate — годовая ставка сделки с учётом FLOAT и cap/floor
+// Возвращает ставку в долях
+func effectiveRate(deal Deal) float64 {
+	r := deal.InterestRate
+	if strings.EqualFold(deal.RateType, "FLOAT") && deal.BaseIndicatorRate != nil {
+		r += *deal.BaseIndicatorRate
+	}
+	if deal.CapLimitInterestRate != nil && r > *deal.CapLimitInterestRate {
+		r = *deal.CapLimitInterestRate
+	}
+	if deal.FloorLimitInterestRate != nil && r < *deal.FloorLimitInterestRate {
+		r = *deal.FloorLimitInterestRate
+	}
+	return r
+}
+
+// periodsPerYear — сколько периодов данного типа в году.
+// "1M" -> 12, "3M" -> 4, "1Y" -> 1, "45D" -> 365/45.
+func periodsPerYear(period string) float64 {
+	period = strings.ToUpper(strings.TrimSpace(period))
+	switch {
+	case strings.HasSuffix(period, "D"):
+		n, _ := strconv.Atoi(strings.TrimSuffix(period, "D"))
+		if n <= 0 {
+			return 365
+		}
+		return 365.0 / float64(n)
+	case strings.HasSuffix(period, "M"):
+		n, _ := strconv.Atoi(strings.TrimSuffix(period, "M"))
+		if n <= 0 {
+			return 12
+		}
+		return 12.0 / float64(n)
+	case strings.HasSuffix(period, "Y"):
+		n, _ := strconv.Atoi(strings.TrimSuffix(period, "Y"))
+		if n <= 0 {
+			return 1
+		}
+		return 1.0 / float64(n)
+	}
+	return 12
+}
+
+// calcAnnuityPMT — фиксированный платёж аннуитета
+// period нужен, чтобы ставка за период считалась корректно:
+// для "1M" r = annualRate/12, для "3M" r = annualRate/4, для "1Y" r = annualRate.
+func calcAnnuityPMT(principal, annualRate float64, n int, period string) float64 {
+	if n <= 0 || principal <= 0 {
+		return 0
+	}
+	if annualRate == 0 {
+		return principal / float64(n)
+	}
+	r := annualRate / periodsPerYear(period)
+	denom := 1 - math.Pow(1+r, float64(-n))
+	if denom == 0 {
+		return 0
+	}
+	return principal * r / denom
+}
+
+// makeRateAt — замыкание «ставка на дату»
+// Покрывает три сценария:
+//   - FixedSteps задан (FIXED со ступенями): ставка по последней ступени <= t
+//   - FLOAT с RepricingDates/Rates: ставка по последней переоценке <= t
+//   - иначе: базовая effectiveRate(deal)
+func makeRateAt(deal Deal, sched schedules, indices map[string]indexSeries) func(time.Time) float64 {
+    // 1. FIXED со ступенями.
+    if len(sched.FixedSteps) > 0 {
+        steps := sched.FixedSteps
+        return func(t time.Time) float64 {
+            r := steps[0].Value
+            for _, s := range steps {
+                if s.Date.After(t) {
+                    break
+                }
+                r = s.Value
+            }
+            return clampRate(deal, r)
+        }
+    }
+
+    // 2. FLOAT с явными ставками переоценки.
+    if len(sched.RepricingDates) > 0 && len(sched.RepricingRates) == len(sched.RepricingDates) {
+        dates := sched.RepricingDates
+        rates := sched.RepricingRates
+        return func(t time.Time) float64 {
+            r := rates[0]
+            for i, d := range dates {
+                if d.After(t) {
+                    break
+                }
+                r = rates[i]
+            }
+            return clampRate(deal, r)
+        }
+    }
+
+    // 3. FLOAT с индексом (CBKEY1M и т.п.).
+    // Семантика: interest_rate — это маржа, индекс берётся из файла на дату t.
+    if strings.EqualFold(deal.RateType, "FLOAT") && deal.BaseIndicator != "" {
+        if series, ok := indices[deal.BaseIndicator]; ok {
+            margin := deal.InterestRate
+            return func(t time.Time) float64 {
+                idx, ok := series.rateAt(t)
+                if !ok {
+                    return clampRate(deal, margin)
+                }
+                return clampRate(deal, margin+idx)
+            }
+        }
+        // индекс не найден — падаем на базовую
+    }
+
+    // 4. Базовая.
+    base := effectiveRate(deal)
+    return func(time.Time) float64 { return base }
+}
+
+// clampRate — cap/floor на уже полученную ставку.
+func clampRate(deal Deal, r float64) float64 {
+	if deal.CapLimitInterestRate != nil && r > *deal.CapLimitInterestRate {
+		r = *deal.CapLimitInterestRate
+	}
+	if deal.FloorLimitInterestRate != nil && r < *deal.FloorLimitInterestRate {
+		r = *deal.FloorLimitInterestRate
+	}
+	return r
 }
