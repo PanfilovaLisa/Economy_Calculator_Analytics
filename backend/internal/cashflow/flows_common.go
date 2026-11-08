@@ -12,7 +12,7 @@ type flowContext struct {
     Maturity      time.Time
     Report        time.Time
     Now           time.Time
-    Remaining     float64
+    Remaining     float64 //остаток долга на момент события!
     DayConvention string
     isDeposit     bool
     RateAt        func(time.Time) float64

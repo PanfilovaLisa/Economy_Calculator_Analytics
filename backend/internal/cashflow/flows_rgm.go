@@ -32,12 +32,13 @@ func generateDifferentiatedFlows(deal Deal, ctx flowContext) []CashFlow {
 		balanceBefore := remaining
 		remaining = roundMoney(remaining - principal)
 
-		if principal != 0 {
-			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
-		}
 		if interest != 0 {
 			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, interest, balanceBefore))
 		}
+		if principal != 0 {
+			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
+		}
+		
 		from = payDate
 		if remaining <= 0 {
 			break
