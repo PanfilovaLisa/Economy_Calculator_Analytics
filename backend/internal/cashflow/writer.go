@@ -4,18 +4,29 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"strings"
 	"path/filepath"
 	"time"
 )
 
-func SaveToCSV(flows []CashFlow, outputDir string) error {
+func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
 	err := os.MkdirAll(outputDir, os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("не удалось создать папку %s: %w", outputDir, err)
 	}
 
 	now := time.Now().Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("cashflows_%s.csv", now)
+
+	base := filepath.Base(sourceName)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	base = sanitizeFileName(base)
+
+	suffix := ""
+	if base != "" {
+		suffix = "_" + base
+	}
+
+	fileName := fmt.Sprintf("cashflows_%s%s.csv", now, suffix)
 	filePath := filepath.Join(outputDir, fileName)
 
 	file, err := os.Create(filePath)
@@ -62,4 +73,27 @@ func SaveToCSV(flows []CashFlow, outputDir string) error {
 
 	fmt.Printf("История сохранена в файл: %s\n", filePath)
 	return nil
+}
+
+func sanitizeFileName(s string) string {
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range s {
+		isSafe := (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_'
+		if isSafe {
+			b.WriteRune(r)
+			prevUnderscore = false
+		} else if !prevUnderscore {
+			b.WriteRune('_')
+			prevUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if len(out) > 60 {
+		out = out[:60]
+	}
+	return out
 }

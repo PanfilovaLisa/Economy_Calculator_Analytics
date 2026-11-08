@@ -78,7 +78,7 @@ func (handler *CashFlowHandler) Calculate() http.HandlerFunc {
 			}
 		}
 
-		err = SaveToCSV(allCashFlows, "../history")
+		err = SaveToCSV(allCashFlows, "../history", fileHeader.Filename)
 		if err != nil {
 			fmt.Printf("Ошибка сохранения истории: %v\n", err)
 		}

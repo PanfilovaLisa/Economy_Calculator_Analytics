@@ -21,28 +21,41 @@ func generateDifferentiatedFlows(deal Deal, ctx flowContext) []CashFlow {
 	for i, payDate := range payDates {
 		yearFrac := YearFraction(from, payDate, ctx.DayConvention)
 		rate := ctx.RateAt(from)
-		interest := roundMoney(remaining * rate * yearFrac)
-
-		principal := fixedPrincipal
-		if i == n-1 || principal > remaining {
-			principal = remaining
-		}
-		principal = roundMoney(principal)
+		interest := remaining * rate * yearFrac
 
 		balanceBefore := remaining
-		remaining = roundMoney(remaining - principal)
+		isLast := i == n-1
+
+		var principal, closeAmt float64
+
+		if isLast {
+			// Последний период: регулярная часть — fixedPrincipal,
+			// остаток после неё — close_payment.
+			principal = fixedPrincipal
+			if principal > remaining { principal = remaining }
+			principal = roundMoney(principal)
+			closeAmt = roundMoney(remaining - principal)
+		} else {
+			principal = fixedPrincipal
+			if principal > remaining { principal = remaining }
+			principal = roundMoney(principal)
+		}
+
+		remainingAfterPrincipal := remaining - principal
 
 		if interest != 0 {
-			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, interest, balanceBefore))
+			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, roundMoney(interest), balanceBefore))
 		}
 		if principal != 0 {
-			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
+			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remainingAfterPrincipal))
 		}
-		
+		if closeAmt != 0 {
+			cfs = append(cfs, emitClose(deal, ctx, from, payDate, closeAmt, 0))
+		}
+
+		remaining = remaining - principal - closeAmt
 		from = payDate
-		if remaining <= 0 {
-			break
-		}
+		if remaining <= 0 { break }
 	}
 	return cfs
 }

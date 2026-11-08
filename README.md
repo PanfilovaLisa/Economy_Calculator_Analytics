@@ -1,7 +1,14 @@
 # Economy_Calculator_Analytics
 
 ```bash
+cd Economy_Calculator_Analytics
+cd backend
+go build ./...
+go run cmd/main.go
 
+#в другом терминале
+cd Economy_Calculator_Analytics
+curl -X POST http://localhost:8082/calculate -F "file=@testfile/1deal.csv"
 ```
 
 # Cashflow MVP
@@ -207,7 +214,7 @@ date;rate
 ### Неизвестные значения
 
 - `rate_type_cd` не FIXED и не FLOAT → fallback FIXED, предупреждение.
-- `day_convention_cd` не ACT/365 и не ACT/ACT → fallback ACT/365, предупреждение.
+- `day_convention_cd` не ACT/365, и не ACT/ACT, и не ACT/ACT ISDA → fallback ACT/365, предупреждение.
 
 ---
 
@@ -265,9 +272,14 @@ date;rate
 2. Краевые случаи: `principal_payment` не сходится, `maturity` не в графике, `rate_type` неизвестен, `day_convention` неизвестен.
 
 ---
+## Сделки, которые правильно работают
+1, 2, 5
 
-## Итог
+## Замечания
+* округление - нужно продумать
 
-MVP — три независимых расписания (тело, проценты, переоценка) с приоритетом явных списков над правилами. FIXED — `interest_rate` + `_fixed` ступени. FLOAT — `interest_rate + base_indicator_rate` + переоценка по `repricing_dttm_schedule` / `repricing_rule_*`; если переоценки нет — ставка фиксирована на уровне `interest_rate + base_indicator_rate` (FLOAT без обновления индекса). Sub — поверх основной (добавлять, уточнить). Fallback для тела — график процентов. Пропуск дат в прошлом. Добивка остатка на `maturity`. Не используем `behavior_model_cd`, `accrued_interest`, `start_principal_amt`, `indicator_lag_cd`.
+* дата отчета не значит что в ней обязательно должен происходить платеж! (пример 1 сделка)
+для решения добавляю поле AccrualStart  time.Time в flowContext  
+? что переделать для simple?
 
-**План:** каркас → три расписания → ставки → тело по типам → sub → тесты. **7 вопросов бизнесу — до старта.**
+* ошибка: если генерация идет вроде remaining > 0, нету close payment
