@@ -140,7 +140,7 @@ func emitInterest(deal Deal, ctx flowContext, from, to time.Time, interest, bala
 		TimeBucket:       GetTimeBucket(days),
 		PaymentType:      TypeInterestPayment,
 		PrincipalAmount:  0,
-		InterestAmount:   roundMoney(ctx.Signed(interest)),
+		InterestAmount:   ctx.Signed(interest),
 		RemainingBalance: roundMoney(ctx.Signed(balanceBefore)),
 	}
 }

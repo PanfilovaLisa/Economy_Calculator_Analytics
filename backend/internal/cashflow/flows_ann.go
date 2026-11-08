@@ -22,34 +22,38 @@ func generateAnnuityFlows(deal Deal, ctx flowContext) []CashFlow {
 	for i, payDate := range payDates {
 		yearFrac := YearFraction(from, payDate, ctx.DayConvention)
 		rate := ctx.RateAt(from)
-		interest := roundMoney(remaining * rate * yearFrac)
-
-		principal := remaining
-		if i != n-1 {
-			principal = roundMoney(pmt - interest)
-		}
-		if principal < 0 {
-			principal = 0
-		}
-		if principal > remaining {
-			principal = remaining
-		}
-		principal = roundMoney(principal)
+		interest := remaining * rate * yearFrac
 
 		balanceBefore := remaining
-		remaining = roundMoney(remaining - principal)
+		var principal, closeAmt float64
+
+		if i != n-1 {
+			principal = roundMoney(pmt - interest)
+			if principal < 0 { principal = 0 }
+			if principal > remaining { principal = remaining }
+		} else {
+			// Последний период: сначала аннуитетная часть, потом close
+			principal = roundMoney(pmt - interest)
+			if principal < 0 { principal = 0 }
+			if principal > remaining { principal = remaining }
+			closeAmt = roundMoney(remaining - principal)
+		}
+
+		remainingAfterPrincipal := roundMoney(remaining - principal)
 
 		if interest != 0 {
-			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, interest, balanceBefore))
+			cfs = append(cfs, emitInterest(deal, ctx, from, payDate, roundMoney(interest), balanceBefore))
 		}
 		if principal != 0 {
-			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
+			cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remainingAfterPrincipal))
 		}
-		
+		if closeAmt != 0 {
+			cfs = append(cfs, emitClose(deal, ctx, from, payDate, closeAmt, 0))
+		}
+
+		remaining = roundMoney(remaining - principal - closeAmt)
 		from = payDate
-		if remaining <= 0 {
-			break
-		}
+		if remaining <= 0 { break }
 	}
 	return cfs
 }
