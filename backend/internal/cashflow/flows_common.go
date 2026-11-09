@@ -8,11 +8,12 @@ import (
 
 type flowContext struct {
     StartDate     time.Time
-	AccrualStart  time.Time //дата начала процентного периода
+    AccrualStart          time.Time // дата начала первого процентного периода
+    AccrualStartPrincipal time.Time // дата начала первого периода тела (последнее погашение тела в прошлом)
     Maturity      time.Time
     Report        time.Time
     Now           time.Time
-    Remaining     float64 //остаток долга на момент события!
+    Remaining     float64
     DayConvention string
     isDeposit     bool
     RateAt        func(time.Time) float64
@@ -55,17 +56,21 @@ func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, boo
 
 	conv := normalizeDayConvention(deal.DayConvention)
 
+	accrualStart := computeAccrualStart(deal, start)
+	accrualStartPrincipal := computeAccrualStartPrincipal(deal, start)
+
 	ctx := flowContext{
-        StartDate:     start,
-		AccrualStart:  computeAccrualStart(deal, start),
-        Maturity:      deal.MaturityDate,
-        Report:        deal.ReportDate,
-        Now:           time.Now(),
-        Remaining:     remaining,
-        DayConvention: conv,
-        isDeposit:     isDeposit,
-        Indices:       indices,
-    }
+		StartDate:             start,
+		AccrualStart:          accrualStart,
+		AccrualStartPrincipal: accrualStartPrincipal,
+		Maturity:              deal.MaturityDate,
+		Report:                deal.ReportDate,
+		Now:                   time.Now(),
+		Remaining:             remaining,
+		DayConvention:         conv,
+		isDeposit:             isDeposit,
+		Indices:               indices,
+	}
 
 	sched, err := buildSchedules(deal, ctx)
 	if err != nil {
@@ -206,6 +211,41 @@ func computeAccrualStart(deal Deal, start time.Time) time.Time {
     return prev
 }
 
+// computeAccrualStartPrincipal — дата начала первого периода тела:
+// последняя дата погашения тела в прошлом (из ручного графика или правила),
+// либо ctx.StartDate, если тела в прошлом не было.
+// Для ANN/RGM — предыдущая плановая дата тела (RegularPayPeriod).
+// Для SIMPLE — по ручному графику или по RegularPayPeriod, если задан.
+func computeAccrualStartPrincipal(deal Deal, start time.Time) time.Time {
+    var prev time.Time
+    switch deal.Discriminator {
+    case DiscANN, DiscRGM:
+        // Для ANN/RGM тело идёт по RegularPayPeriod; дата начала периода тела
+        // = предыдущая плановая дата тела.
+        prev = previousFromRule(deal.RegularPayStart, deal.MaturityDate,
+            start, deal.RegularPayPeriod, deal.RegularPayDayNum)
+    case DiscSIMPLE:
+        // Ручной график имеет приоритет
+        if manual := parseManualSchedule(deal.ManualPrincipalPayment); len(manual) > 0 {
+            for _, mp := range manual {
+                if mp.Date.Before(start) && mp.Date.After(prev) {
+                    prev = mp.Date
+                }
+            }
+        } else if deal.RegularPayPeriod != "" && deal.RegularPayPeriod != "ENDDATE" {
+            // Правило тела, если ручного графика нет
+            prev = previousFromRule(deal.RegularPayStart, deal.MaturityDate,
+                start, deal.RegularPayPeriod, deal.RegularPayDayNum)
+        }
+        // Если ни ручного, ни правила — prev остаётся zero (тело только в maturity)
+    }
+
+    if prev.IsZero() {
+        prev = start
+    }
+    return prev
+}
+
 // previousFromRule — последняя плановая дата <= before, вычисленная по правилу.
 // Возвращает zero time.Time, если правило пустое или предыдущих дат нет.
 func previousFromRule(ruleStart *time.Time, maturity, before time.Time,
@@ -232,3 +272,4 @@ func previousFromRule(ruleStart *time.Time, maturity, before time.Time,
     }
     return result
 }
+

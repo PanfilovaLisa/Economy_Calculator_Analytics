@@ -42,7 +42,7 @@ func generateSimpleFlows(deal Deal, ctx flowContext) []CashFlow {
 		}
 		if principal != 0 {
 			if isLast {
-				cfs = append(cfs, emitClose(deal, ctx, from, payDate, principal, remaining))
+				cfs = append(cfs, emitClose(deal, ctx, ctx.AccrualStartPrincipal, payDate, principal, remaining))
 			} else {
 				cfs = append(cfs, emitPrincipal(deal, ctx, from, payDate, principal, remaining))
 			}
@@ -71,7 +71,8 @@ func generateManualFlows(deal Deal, ctx flowContext, principalSched []scheduleIt
 
 	var cfs []CashFlow
 	remaining := ctx.Remaining
-	from := ctx.AccrualStart
+	from := ctx.AccrualStart                    // для процентов
+	fromPrincipal := ctx.AccrualStartPrincipal  // для тела
 
 	i, j := 0, 0
 	for i < len(interestDates) || j < len(principalDates) {
@@ -107,6 +108,7 @@ func generateManualFlows(deal Deal, ctx flowContext, principalSched []scheduleIt
 			principalAmt = principalDates[j].Value
 		}
 
+		// Проценты — от предыдущего события (разрезаются датой тела).
 		yearFrac := YearFraction(from, d, ctx.DayConvention)
 		rate := ctx.RateAt(from)
 		interest := remaining * rate * yearFrac
@@ -135,25 +137,30 @@ func generateManualFlows(deal Deal, ctx flowContext, principalSched []scheduleIt
 
 		remainingAfterPrincipal := remaining - principal
 
+		// 1. Проценты — от предыдущего события.
 		if interest != 0 {
 			cfs = append(cfs, emitInterest(deal, ctx, from, d, roundMoney(interest), balanceBefore))
 		}
 
-		// 2. Тело (только на датах тела).
+		// 2. Тело — от предыдущего погашения тела (fromPrincipal).
 		if principal != 0 {
 			if isLast {
-				cfs = append(cfs, emitClose(deal, ctx, from, d, principal, remainingAfterPrincipal))
+				cfs = append(cfs, emitClose(deal, ctx, fromPrincipal, d, principal, remainingAfterPrincipal))
 			} else {
-				cfs = append(cfs, emitPrepayment(deal, ctx, from, d, principal, remainingAfterPrincipal))
+				cfs = append(cfs, emitPrepayment(deal, ctx, fromPrincipal, d, principal, remainingAfterPrincipal))
 			}
 		}
 
 		if closeAmt != 0 {
-			cfs = append(cfs, emitClose(deal, ctx, from, d, closeAmt, 0))
+			cfs = append(cfs, emitClose(deal, ctx, fromPrincipal, d, closeAmt, 0))
 		}
 
 		remaining = remaining - principal - closeAmt
 		from = d
+
+		if hasPrincipal {
+			fromPrincipal = d
+		}
 
 		if hasInterest {
 			i++
