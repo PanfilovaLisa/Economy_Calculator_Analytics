@@ -194,12 +194,6 @@ func computeAccrualStart(deal Deal, start time.Time) time.Time {
                 deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
         }
     case DiscSIMPLE:
-        if len(parseManualSchedule(deal.ManualPrincipalPayment)) > 0 {
-            // Ручной график тела: сохраняем текущее поведение,
-            // т.к. корректный учёт процентов по interest-правилу
-            // требует отдельного рефакторинга.
-            return start
-        }
         prev = previousFromRule(deal.InterestPayStart, deal.MaturityDate,
             deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
     }
