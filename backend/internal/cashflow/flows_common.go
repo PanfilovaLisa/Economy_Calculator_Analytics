@@ -199,8 +199,19 @@ func computeAccrualStart(deal Deal, start time.Time) time.Time {
                 deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
         }
     case DiscSIMPLE:
+    // Ручной график процентов имеет приоритет: предыдущая дата <= start
+    if manual := parseManualDates(deal.ManualInterestPayment); len(manual) > 0 {
+        for _, d := range manual {
+            if !d.After(start) && d.After(prev) {
+                prev = d
+            }
+        }
+    }
+    // Иначе правило процентов
+    if prev.IsZero() {
         prev = previousFromRule(deal.InterestPayStart, deal.MaturityDate,
             deal.ReportDate, deal.InterestPayPeriod, deal.InterestPayDayNum)
+    }
     }
     if prev.IsZero() || (!deal.DealDate.IsZero() && prev.Before(deal.DealDate)) {
         prev = deal.DealDate
