@@ -3,230 +3,377 @@ package cashflow
 import (
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// scheduleItem — пара (дата, значение)
-// Семантика Value зависит от поля schedules:
-//   - Principal:   сумма платежа тела (или 0 — «остаток, посчитать формулой»)
-//   - FixedSteps:  годовая ставка в долях (0.05 = 5%)
+//Value зависит от поля schedules:
+//- Principal: сумма платежа тела (или 0 остаток, посчитать формулой), -1 - не платеж
+//- FixedSteps: годовая ставка в долях (0.05)
 type scheduleItem struct {
 	Date  time.Time
 	Value float64
 }
 
+func (si scheduleItem) IsZero() bool {
+	return si.Date.IsZero()
+}
+
+//всегда shedule[0] - accrualStart - !дата начала первого платежа!, далее только даты будущих платежей
 type schedules struct {
 	Principal      []scheduleItem
-	InterestDates  []time.Time
-	RepricingDates []time.Time
-	RepricingRates []float64
+	InterestDates  []scheduleItem //у процентов нету value всегда равно 0, кроме InterestDates[0].value = -1
+	Repricing      []scheduleItem //в Repricing и FixedSteps Value - это ставка на которую меняет в соответствующую дату
 	FixedSteps     []scheduleItem
 }
 
-// buildSchedules — собирает все расписания
-// Даты процентов строятся один раз и переиспользуются в buildPrincipal (fallback)
+// собирает все расписания вместе
+//Тело: ManualPrincipalPayment -> RegularPayPeriod -> даты процентов -> [maturity]
+//Проценты: ManualInterestPayment ->  InterestPayPeriod -> даты тела -> [maturity]
+//Если оба пусты -> [maturity] для обоих (не ошибка, просто вырожденный случай)
 func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
-	interestDates := buildInterestDates(deal, ctx)
+	principal, err := buildPrincipal(deal, ctx)
+    if err != nil { return schedules{}, err }
 
-	principal, err := buildPrincipal(deal, ctx, interestDates)
-	if err != nil {
-		return schedules{}, fmt.Errorf("buildSchedules: principal: %w", err)
+    interest, err := buildInterest(deal, ctx)
+    if err != nil { return schedules{}, err }
+
+    if principal == nil {
+		if deal.Discriminator == DiscSIMPLE { principal = []scheduleItem{{deal.MaturityDate, 0}} }
+
+        if interest != nil {
+            principal = interest
+        } else {
+            principal = []scheduleItem{{deal.MaturityDate, 0}}
+        }
+    }
+    if interest == nil {
+        if principal != nil {
+            interest = principalToInterest(principal)
+        } else {
+            interest = []scheduleItem{{deal.MaturityDate, 0}}
+        }
+    }
+	
+	var fixedRepricing []scheduleItem = nil
+	var repricing []scheduleItem = nil
+	if deal.RateType == RateFloat {
+		repricing, err := buildFloatRepricing(deal, ctx)
+    	if err != nil { return schedules{}, err }
+	} else { 
+		fixedRepricing, err = buildFixedRepricing(deal.MaturityDate, ctx.StartDate, deal.RepricingRateFixed)
+		if err != nil { return schedules{}, err }
 	}
 
-	repricingDates, repricingRates, err := buildRepricing(deal, ctx)
-	if err != nil {
-		return schedules{}, fmt.Errorf("buildSchedules: repricing: %w", err)
-	}
-
-	return schedules{
-		Principal:      principal,
-		InterestDates:  interestDates,
-		RepricingDates: repricingDates,
-		RepricingRates: repricingRates,
-		FixedSteps:     buildFixedSteps(deal, ctx),
-	}, nil
+    return schedules{
+        Principal:     principal,
+        InterestDates: interest,
+        Repricing:     repricing,
+        FixedSteps:    fixedRepricing,
+    }, nil
 }
 
-// buildPrincipal — расписание тела: даты + суммы.
-// Приоритет:
-//  1. principal_payment (ручной график).
-//  2. regular_payment_rule_period_cd:
-//     - ENDDATE -> [maturity] с Value = 0;
-//     - другое -> правило от regular_payment_rule_start_dttm, Value = 0.
-//  3. fallback — даты процентов, Value = 0.
-//
-// Везде гарантируется maturity в конце (иначе последний период не оплатится).
-// Возвращает error, если ручной график задан, но после фильтра
-// (даты >= StartDate) не осталось ни одной записи — почти наверняка ошибка конфигурации.
-func buildPrincipal(deal Deal, ctx flowContext, interestDates []time.Time) ([]scheduleItem, error) {
-	// 1. Ручной график.
-	if manual := parseManualSchedule(deal.ManualPrincipalPayment); len(manual) > 0 {
-		out := make([]scheduleItem, 0, len(manual)+1)
-		for _, mp := range manual {
-			if !mp.Date.Before(ctx.StartDate) {
-				out = append(out, scheduleItem{Date: mp.Date, Value: mp.Amount})
+func filterManual(manual []scheduleItem, maturity, start time.Time, isRepricing bool) ([]scheduleItem, error) {
+	var dates []scheduleItem
+	prev := scheduleItem{}
+	for _, item := range manual {
+		if item.Date.After(maturity) {
+			if len(dates) == 0 && !isRepricing {
+				return nil, fmt.Errorf("all payments > maturity")
 			}
+			break
 		}
-		if len(out) == 0 {
-			return nil, fmt.Errorf(
-				"buildPrincipal: manual principal_payment задан (%d записей), "+
-					"но все даты раньше StartDate=%s",
-				len(manual), ctx.StartDate.Format("2006-01-02"),
-			)
-		}
-		// Гарантируем maturity в конце.
-		if !out[len(out)-1].Date.Equal(ctx.Maturity) {
-			out = append(out, scheduleItem{Date: ctx.Maturity, Value: 0})
-		}
-		return out, nil
-	}
-
-	// 2. Правило.
-	if period := deal.RegularPayPeriod; period != "" {
-		if period == "ENDDATE" {
-			return []scheduleItem{{Date: ctx.Maturity, Value: 0}}, nil
-		}
-		if anchor, ok := getAnchor(deal.RegularPayDayNum, deal.RegularPayStart); ok {
-			start := ruleStart(ctx, deal.RegularPayStart)
-			dates := buildSchedule(start, ctx.Maturity, period, anchor)
-			out := make([]scheduleItem, len(dates))
-			for i, d := range dates {
-				out[i] = scheduleItem{Date: d, Value: 0}
+		if (!item.Date.Before(start)) {
+			if len(dates) == 0 {
+				if isRepricing {
+					if prev.IsZero() {
+						dates = append(dates, scheduleItem{Date: start, Value: 0})
+					} else {
+						dates = append(dates, prev)
+					}
+				} else {
+					if prev.IsZero() {
+						dates = append(dates, scheduleItem{Date: start, Value: -1})
+					} else {
+						dates = append(dates, scheduleItem{Date: prev.Date, Value: -1})
+					}
+				}
 			}
-			return out, nil
+			dates = append(dates, item)
 		}
+		prev = item
 	}
-
-	// 3. Fallback — даты процентов (уже с maturity).
-	out := make([]scheduleItem, 0, len(interestDates)+1)
-	for _, d := range interestDates {
-		out = append(out, scheduleItem{Date: d, Value: 0})
-	}
-	if len(out) == 0 || !out[len(out)-1].Date.Equal(ctx.Maturity) {
-		out = append(out, scheduleItem{Date: ctx.Maturity, Value: 0})
-	}
-	return out, nil
+	return dates, nil
 }
 
-// buildInterestDates — даты эмиссии процентов.
-// Приоритет:
-//  1. interest_payment (ручной график дат).
-//  2. interest_payment_rule_period_cd:
-//     - ENDDATE -> [maturity];
-//     - другое -> правило от interest_payment_rule_start_dttm.
-//  3. fallback — [maturity].
-func buildInterestDates(deal Deal, ctx flowContext) []time.Time {
-	// 1. Ручной график.
-	if manual := parseManualDates(deal.ManualInterestPayment); len(manual) > 0 {
-		out := make([]time.Time, 0, len(manual)+1)
-		for _, d := range manual {
-			if !d.Before(ctx.StartDate) {
-				out = append(out, d)
-			}
-		}
-		if len(out) == 0 {
-			return []time.Time{ctx.Maturity}
-		}
-		if !out[len(out)-1].Equal(ctx.Maturity) {
-			out = append(out, ctx.Maturity)
-		}
-		return out
-	}
+//строит расписание для тела
+//только для simple расматриваем ручные графики, все остальные только по правилу
+func buildPrincipal(deal Deal, ctx flowContext) ([]scheduleItem, error) {
+    if deal.Discriminator == DiscSIMPLE {
+		manual, err := parseManualSchedule(deal.ManualPrincipalPayment)
+		if err != nil { return nil, fmt.Errorf("principal_payment: %w", err)}
+        
+		if len(manual) > 0 {
+			dates, err := filterManual(manual, deal.MaturityDate, ctx.StartDate, false)
+			if err != nil { return nil, fmt.Errorf("principal_payment: %w", err)}
+			dates = append(dates, scheduleItem{Date: deal.MaturityDate, Value: 0}) //всегда добавляем close payment (могут повторятся)
+            return dates, nil
+        }
+    }
 
-	// 2. Правило.
-	if period := deal.InterestPayPeriod; period != "" {
-		if period == "ENDDATE" {
-			return []time.Time{ctx.Maturity}
-		}
-		if anchor, ok := getAnchor(deal.InterestPayDayNum, deal.InterestPayStart); ok {
-			start := ruleStart(ctx, deal.InterestPayStart)
-			return buildSchedule(start, ctx.Maturity, period, anchor)
-		}
-	}
-
-	// 3. Fallback.
-	return []time.Time{ctx.Maturity}
+    anchorDay, hasAnchor := getAnchor(deal.RegularPayDayNum, deal.RegularPayStart)
+	//RegularPayStart если этого нет, то просто считаю, что правило не задано
+	if deal.RegularPayPeriod != "" && hasAnchor && deal.RegularPayStart != nil {
+        if deal.RegularPayPeriod == "ENDDATE" {
+            return []scheduleItem{{deal.MaturityDate, 0}}, nil
+        }
+        dates, err := buildSchedule(*deal.RegularPayStart, deal.MaturityDate, ctx.StartDate, deal.RegularPayPeriod, anchorDay, false)
+        if err != nil {
+            return nil, fmt.Errorf("principal_payment: %w", err)
+        }
+        return dates, nil
+    }
+    return nil, nil // ничего не задано
 }
 
-// buildRepricing — даты и ставки переоценки. Только для FLOAT.
-// Возвращает (nil, nil, nil), если RateType != FLOAT или переоценки нет.
-// Если ставки заданы — их длина обязана совпасть с длиной дат.
-func buildRepricing(deal Deal, ctx flowContext) ([]time.Time, []float64, error) {
-	if deal.RateType != "FLOAT" {
-		return nil, nil, nil
+//строит расписание для процентов
+//только для simple расматриваем ручные графики, все остальные только по правилу
+func buildInterest(deal Deal, ctx flowContext) ([]scheduleItem, error) {
+	if deal.Discriminator == DiscSIMPLE {
+		manual, err := parseManualDates(deal.ManualInterestPayment)
+		if err != nil { return nil, fmt.Errorf("interest_payment: %w", err)}
+        
+		if len(manual) > 0 {
+			dates, err := filterManual(manual, deal.MaturityDate, ctx.StartDate, false)
+			if err != nil { return nil, fmt.Errorf("interest_payment: %w", err)}
+			if !dates[len(dates)-1].Date.Equal(deal.MaturityDate) {
+				dates = append(dates, scheduleItem{Date: deal.MaturityDate, Value: 0}) //не всегда добавляем MaturityDate (только если нету)
+			}
+            return dates, nil
+        }
+    }
+
+    anchorDay, hasAnchor := getAnchor(deal.InterestPayDayNum, deal.InterestPayStart)
+	//InterestPayStart если этого нет, то просто считаю, что правило не задано
+	if deal.InterestPayPeriod != "" && hasAnchor && deal.InterestPayStart != nil {
+        if deal.InterestPayPeriod == "ENDDATE" {
+            return []scheduleItem{{deal.MaturityDate, 0}}, nil
+        }
+        dates, err := buildSchedule(*deal.InterestPayStart, deal.MaturityDate, ctx.StartDate, deal.InterestPayPeriod, anchorDay, false)
+        if err != nil {
+            return nil, fmt.Errorf("interest_payment: %w", err)
+        }
+        return dates, nil
+    }
+    return nil, nil // ничего не задано
+}
+
+//для поля repricing_dttm_rate_schedule_fixed
+//если ставка FIXED, то на поля repricing_dttm_schedule и repricing_dttm_rate_schedule не обращаем внимания
+func buildFixedRepricing(maturity, start time.Time, repricingRateFixed string) ([]scheduleItem, error) {
+	manual, err := parseManualSchedule(repricingRateFixed)
+	if err != nil { return nil, fmt.Errorf("fixed_repricing: %w", err) }
+	
+	if len(manual) > 0 {
+		dates, err := filterManual(manual, maturity, start, true)
+		if err != nil { return nil, fmt.Errorf("fixed_repricing: %w", err)}
+		return dates, nil
 	}
 
-	dates := buildRepricingDates(deal, ctx)
-	rates := parseManualRates(deal.RepricingRateSchedule)
+	return nil, nil
+}
 
-	if len(rates) > 0 && len(dates) > 0 && len(rates) != len(dates) {
-		return nil, nil, fmt.Errorf(
-			"buildRepricing: len(repricingDates)=%d != len(repricingRates)=%d",
+//даты либо по правилу, либо по repricing_dttm_schedule, тогда ставки из cbkey
+//либо если есть repricing_dttm_rate_schedule и даты, и ставки отсюда
+func buildFloatRepricing(deal Deal, ctx flowContext) ([]scheduleItem, error) {
+	manual, err := parseManualSchedule(deal.RepricingRateFloat);
+	if err != nil { return nil, fmt.Errorf("float_repricing: %w", err) }
+	if len(manual) > 0 {
+		dates, err := filterManual(manual, deal.MaturityDate, ctx.StartDate, true)
+		if err != nil { return nil, fmt.Errorf("float_repricing: %w", err) }
+		return dates, nil
+	}
+
+    anchorDay, hasAnchor := getAnchor(deal.RepricingRuleDayNum, deal.RepricingRuleStart)
+	//RepricingRuleStart если этого нет, то просто считаю, что правило не задано
+	if deal.RepricingRulePeriod != "" && hasAnchor && deal.RepricingRuleStart != nil {
+        if deal.RepricingRulePeriod == "ENDDATE" {
+			return []scheduleItem{{Date: deal.MaturityDate, Value: 0}}, nil
+		}
+        dates, err := buildSchedule(*deal.RepricingRuleStart, deal.MaturityDate, ctx.StartDate, deal.RepricingRulePeriod, anchorDay, true)
+        if err != nil { return nil, fmt.Errorf("float_repricing: %w", err) }
+
+		//дальше ищем в cbkey ставки которые актуальны на дату и заполняем value
+		
+    }
+
+    return nil, nil // ничего не задано
+}
+
+//вспомогательные-----------------------------------
+//из расписания тела делает расписание для процентов
+func principalToInterest(principal []scheduleItem) ([]scheduleItem) {
+	if principal == nil { return nil}
+
+	var interest []scheduleItem
+	prev := time.Time{}
+	for _, item := range principal {
+		//повторяющиеся у тела могут быть только в maturity, у процентов не должно быть повторяющихся дат
+		if prev != item.Date {
+			interest = append(interest, scheduleItem{Date: item.Date, Value: 0})
+			prev = item.Date
+		}
+	}
+	return interest
+}
+
+//парсит principal_payment: "2022-12-31,250000 2023-01-31,250000"
+//и парсит repricing_dttm_rate_schedule_fixed: "2022-08-31,0.09"
+//и сортирует
+func parseManualSchedule(s string) ([]scheduleItem, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var list []scheduleItem
+	for _, tok := range strings.Fields(s) {
+		parts := strings.SplitN(tok, ",", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("token %q: expected 'date,amount'", tok)
+		}
+		dt, err := parseDate(strings.TrimSpace(parts[0]))
+		if err != nil {
+			return nil, fmt.Errorf("token %q: date: %w", tok, err)
+		}
+		amt, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("token %q: amount: %w", tok, err)
+		}
+		list = append(list, scheduleItem{Date: dt, Value: amt})
+	}
+	sort.Slice(list, func(i, j int) bool {
+        return list[i].Date.Before(list[j].Date)
+    })
+	return list, nil
+}
+
+//парсит interest_payment / repricing_dttm_schedule и сортирует
+//"2022-09-30 2022-10-31 2022-11-30".
+func parseManualDates(s string) ([]scheduleItem, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var list []scheduleItem
+	for _, tok := range strings.Fields(s) {
+		dt, err := parseDate(tok)
+		if err != nil {
+			return nil, fmt.Errorf("token %q: date: %w", tok, err)
+		}
+		list = append(list, scheduleItem{Date: dt, Value: 0})
+	}
+	sort.Slice(list, func(i, j int) bool {
+        return list[i].Date.Before(list[j].Date)
+    })
+	return list, nil
+}
+
+//парсит дату в одном из поддерживаемых форматов:
+// 2006-01-02 или 02.01.2006. Если не подошёл ни один — ошибка
+func parseDate(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Parse("02.01.2006", s)
+}
+
+func getAnchor(dayNum *int, start *time.Time) (int, bool) {
+	if dayNum != nil {
+		if *dayNum > 0 {
+			return *dayNum, true
+		}
+		if *dayNum == -1 {
+			return -1, true
+		}
+	}
+	if start != nil {
+		return start.Day(), true
+	}
+	return 0, false
+}
+
+
+
+
+
+// ruleStart — вычисляет дату старта правила: max(ctx.StartDate, ruleStart).
+//можно просто передовать ctx.StartDate
+func ruleStart(ctx flowContext, rs *time.Time) time.Time {
+	if rs != nil && rs.After(ctx.StartDate) {
+		return *rs
+	}
+	return ctx.StartDate
+}
+
+// parseManualRates — парсит repricing_dttm_rate_schedule: "0.05 0.06 0.07".
+// Возвращает только ставки (в долях).
+func parseManualRates(s string) []float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var rates []float64
+	for _, tok := range strings.Fields(s) {
+		rate, err := strconv.ParseFloat(tok, 64)
+		if err != nil || rate < 0 {
+			continue
+		}
+		rates = append(rates, rate)
+	}
+	return rates
+}
+
+// parseManualSteps — парсит repricing_dttm_rate_schedule_fixed:
+// "2022-01-01,0.10 2023-01-01,0.12".
+func parseManualSteps(s string) []manualStep {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var out []manualStep
+	for _, tok := range strings.Fields(s) {
+		parts := strings.SplitN(tok, ",", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		dt, err := parseDate(strings.TrimSpace(parts[0]))
+		if err != nil {
+			continue
+		}
+		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil || rate < 0 {
+			continue
+		}
+		out = append(out, manualStep{Date: dt, Rate: rate})
+	}
+	return out
+}
+
+// buildStepRate соединяет даты и ставки в единое расписание (сортирует по дате)
+//для repricing_dttm_schedule и repricing_dttm_rate_schedule
+func buildStepRate(dates []time.Time, rates []float64) ([]manualStep, error) {
+	if len(dates) != len(rates) {
+		return nil, fmt.Errorf(
+			"buildStepRate: len(dates)=%d != len(rates)=%d",
 			len(dates), len(rates),
 		)
 	}
-	if len(rates) > 0 && len(dates) == 0 {
-		return nil, nil, fmt.Errorf(
-			"buildRepricing: repricing_dttm_rate_schedule задан (%d ставок), "+
-				"но repricing_dttm_schedule пуст",
-			len(rates),
-		)
+	if len(dates) == 0 {
+		return nil, nil
 	}
-	return dates, rates, nil
-}
-
-// buildRepricingDates — даты переоценки. Проверка RateType — в buildRepricing;
-// эта функция вызывается только оттуда, поэтому проверка здесь не дублируется.
-func buildRepricingDates(deal Deal, ctx flowContext) []time.Time {
-	// 1. Явный список дат.
-	if dates := parseManualDates(deal.RepricingDttmSchedule); len(dates) > 0 {
-		out := make([]time.Time, 0, len(dates)+1)
-		for _, d := range dates {
-			if !d.Before(ctx.StartDate) {
-				out = append(out, d)
-			}
-		}
-		if len(out) > 0 && !out[len(out)-1].Equal(ctx.Maturity) {
-			out = append(out, ctx.Maturity)
-		}
-		return out
+	out := make([]manualStep, len(dates))
+	for i := range dates {
+		out[i] = manualStep{Date: dates[i], Rate: rates[i]}
 	}
-
-	// 2. Правило.
-	if period := deal.RepricingRulePeriod; period != "" {
-		if anchor, ok := getAnchor(deal.RepricingRuleDayNum, deal.RepricingRuleStart); ok {
-			start := ruleStart(ctx, deal.RepricingRuleStart)
-			return buildSchedule(start, ctx.Maturity, period, anchor)
-		}
-	}
-
-	// 3. Переоценки нет.
-	return nil
-}
-
-// buildFixedSteps — ступени FIXED из repricing_dttm_rate_schedule_fixed.
-// Приоритетнее InterestRate. Возвращает nil, если не задано или RateType != FIXED.
-//
-// Если первая ступень позже StartDate — добавляется синтетическая ступень
-// (StartDate, InterestRate), чтобы ставка для периода [StartDate, firstStep)
-// была определена (а не «будущая ступень»).
-func buildFixedSteps(deal Deal, ctx flowContext) []scheduleItem {
-	if deal.RateType != "FIXED" {
-		return nil
-	}
-	manual := parseManualSteps(deal.RepricingRateFixed)
-	if len(manual) == 0 {
-		return nil
-	}
-	sort.Slice(manual, func(i, j int) bool { return manual[i].Date.Before(manual[j].Date) })
-
-	out := make([]scheduleItem, 0, len(manual)+1)
-	if manual[0].Date.After(ctx.StartDate) {
-		// До первой ступени действует базовая ставка.
-		out = append(out, scheduleItem{Date: ctx.StartDate, Value: deal.InterestRate})
-	}
-	for _, ms := range manual {
-		out = append(out, scheduleItem{Date: ms.Date, Value: ms.Rate})
-	}
-	return out
+	sort.Slice(out, func(i, j int) bool { return out[i].Date.Before(out[j].Date) })
+	return out, nil
 }

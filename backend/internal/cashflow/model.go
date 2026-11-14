@@ -8,8 +8,8 @@ const (
 	TypePrincipalPayment = "principal_payment" // платёж тела долга (регулярный)
 	TypePrepayment       = "prepayment"        // досрочное погашение тела (ручной график)
 	TypeClosePayment     = "close_payment"     // техническая строка закрытия сделки
-	TypeRepricing        = "repricing"         // переоценка ставки (зарезервировано)
-	TypeTimeBucketEnd    = "time_bucket_end"   // конец временного бакета (зарезервировано)
+	TypeRepricing        = "repricing"         // переоценка ставки
+	TypeTimeBucketEnd    = "time_bucket_end"   // конец временного бакета
 )
 
 // Типы сделок
@@ -17,6 +17,11 @@ const (
 	DiscANN    = "ANN"    // аннуитет: равный суммарный платёж
 	DiscRGM    = "RGM"    // дифференцированный: равное тело, проценты на остаток
 	DiscSIMPLE = "SIMPLE" // простой: тело в конце или по ручному графику
+)
+
+const (
+	RateFloat = "FLOAT"
+	RateFixed = "FIXED"
 )
 
 type Deal struct {
@@ -50,8 +55,8 @@ type Deal struct {
 	RepricingRuleStart    *time.Time `json:"repricing_rule_start_dttm"`            // начало правила переоценки ставки
 	RepricingRulePeriod   string     `json:"repricing_rule_period_cd"`             // период переоценки
 	RepricingRuleDayNum   *int       `json:"repricing_rule_day_num"`               // день переоценки
-	RepricingDttmSchedule string     `json:"repricing_dttm_schedule"`              // список дат переоценки (строка)
-	RepricingRateSchedule string     `json:"repricing_dttm_rate_schedule"`         // ставки по датам переоценки (строка)
+	RepricingDttmFloat string     `json:"repricing_dttm_schedule"`              // список дат переоценки (строка)
+	RepricingRateFloat string     `json:"repricing_dttm_rate_schedule"`         // ставки по датам переоценки (строка)
 	RepricingRateFixed    string     `json:"repricing_dttm_rate_schedule_fixed"`   // фиксированные ставки по датам (строка)
 
 	Product         string `json:"product"`           // продукт 
@@ -82,10 +87,9 @@ type Deal struct {
 }
 
 type CashFlow struct {
-	LoadDate   time.Time `json:"load_dttm"`      // когда посчитали (время запуска сервиса)
-	SourceCode string    `json:"source_cd"`      // источник строки
 	Discriminator string `json:"discriminator"`  // тип сделки
 	DealID     int       `json:"deal_id"`        // ID сделки (для join с Deal)
+	RateType string `json:"rate_type"`
 	Currency   string    `json:"currency_cd"`    // валюта
 	ReportDate    time.Time `json:"report_dttm"` // дата отчёта: от неё считаются платежи
 

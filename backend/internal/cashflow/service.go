@@ -1,6 +1,7 @@
 package cashflow
 
 import (
+	"fmt"
     "analytics/configs"
 )
 
@@ -12,18 +13,17 @@ type CashFlowService struct {
 func NewCashFlowService(conf *configs.Config) *CashFlowService {
     return &CashFlowService{
         Config:  conf,
-        Indices: loadIndices("./data"),   // путь к папке с cbkey.txt
+        Indices: loadIndices("./data"), // путь к папке с cbkey.txt (лучше релиазовать через config)
     }
 }
 
-// GenerateCashFlows — метод сервиса, чтобы иметь доступ к Indices.
-func (s *CashFlowService) GenerateCashFlows(deal Deal) []CashFlow {
-    ctx, ok := prepareContext(deal, s.Indices)
-    if !ok {
-        return nil
+func (s *CashFlowService) GenerateCashFlows(deal Deal) ([]CashFlow, error) {
+	ctx, err := prepareContext(deal, s.Indices)
+    if err != nil {
+        return nil, &DealError{DealID: deal.DealID, Err: err}
     }
 
-    switch deal.Discriminator {
+	switch deal.Discriminator {
     case DiscANN:
         return generateAnnuityFlows(deal, ctx)
     case DiscRGM:
@@ -31,6 +31,9 @@ func (s *CashFlowService) GenerateCashFlows(deal Deal) []CashFlow {
     case DiscSIMPLE:
         return generateSimpleFlows(deal, ctx)
     default:
-        return nil
+        return nil, &DealError{
+            DealID: deal.DealID,
+            Err:    fmt.Errorf("unknown discriminator %q", deal.Discriminator),
+        }
     }
 }
