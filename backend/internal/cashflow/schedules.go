@@ -40,13 +40,15 @@ func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
     if err != nil { return schedules{}, err }
 
     if principal == nil {
-		if deal.Discriminator == DiscSIMPLE { principal = []scheduleItem{{deal.MaturityDate, 0}} }
-
-        if interest != nil {
-            principal = interest
-        } else {
-            principal = []scheduleItem{{deal.MaturityDate, 0}}
-        }
+		if deal.Discriminator == DiscSIMPLE { 
+			principal = []scheduleItem{{deal.MaturityDate, 0}} 
+	    } else {
+			if interest != nil {
+				principal = interest
+			} else {
+				principal = []scheduleItem{{deal.MaturityDate, 0}}
+			}
+		}
     }
     if interest == nil {
         if principal != nil {
@@ -56,10 +58,10 @@ func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
         }
     }
 	
-	var fixedRepricing []scheduleItem = nil
-	var repricing []scheduleItem = nil
+	var fixedRepricing []scheduleItem
+	var repricing []scheduleItem
 	if deal.RateType == RateFloat {
-		repricing, err := buildFloatRepricing(deal, ctx)
+		repricing, err = buildFloatRepricing(deal, ctx)
     	if err != nil { return schedules{}, err }
 	} else { 
 		fixedRepricing, err = buildFixedRepricing(deal.MaturityDate, ctx.StartDate, deal.RepricingRateFixed)
@@ -205,10 +207,18 @@ func buildFloatRepricing(deal Deal, ctx flowContext) ([]scheduleItem, error) {
         if err != nil { return nil, fmt.Errorf("float_repricing: %w", err) }
 
 		//дальше ищем в cbkey ставки которые актуальны на дату и заполняем value
-		
+		for i := range dates {
+			rate, ok := ctx.Indices.rateAt(dates[i].Date)
+			if !ok {
+				break
+			}
+			dates[i].Value = rate
+		}
+
+		return dates, nil
     }
 
-    return nil, nil // ничего не задано
+    return nil, nil //ничего не задано
 }
 
 //вспомогательные-----------------------------------
@@ -312,68 +322,4 @@ func ruleStart(ctx flowContext, rs *time.Time) time.Time {
 		return *rs
 	}
 	return ctx.StartDate
-}
-
-// parseManualRates — парсит repricing_dttm_rate_schedule: "0.05 0.06 0.07".
-// Возвращает только ставки (в долях).
-func parseManualRates(s string) []float64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	var rates []float64
-	for _, tok := range strings.Fields(s) {
-		rate, err := strconv.ParseFloat(tok, 64)
-		if err != nil || rate < 0 {
-			continue
-		}
-		rates = append(rates, rate)
-	}
-	return rates
-}
-
-// parseManualSteps — парсит repricing_dttm_rate_schedule_fixed:
-// "2022-01-01,0.10 2023-01-01,0.12".
-func parseManualSteps(s string) []manualStep {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	var out []manualStep
-	for _, tok := range strings.Fields(s) {
-		parts := strings.SplitN(tok, ",", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		dt, err := parseDate(strings.TrimSpace(parts[0]))
-		if err != nil {
-			continue
-		}
-		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil || rate < 0 {
-			continue
-		}
-		out = append(out, manualStep{Date: dt, Rate: rate})
-	}
-	return out
-}
-
-// buildStepRate соединяет даты и ставки в единое расписание (сортирует по дате)
-//для repricing_dttm_schedule и repricing_dttm_rate_schedule
-func buildStepRate(dates []time.Time, rates []float64) ([]manualStep, error) {
-	if len(dates) != len(rates) {
-		return nil, fmt.Errorf(
-			"buildStepRate: len(dates)=%d != len(rates)=%d",
-			len(dates), len(rates),
-		)
-	}
-	if len(dates) == 0 {
-		return nil, nil
-	}
-	out := make([]manualStep, len(dates))
-	for i := range dates {
-		out[i] = manualStep{Date: dates[i], Rate: rates[i]}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date.Before(out[j].Date) })
-	return out, nil
 }

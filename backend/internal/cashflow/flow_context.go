@@ -13,7 +13,7 @@ type flowContext struct {
 	IsDeposit             bool
 	RateAt                func(time.Time) float64
 	schedules             schedules
-	Indices               map[string]indexSeries
+	Indices               *indexSeries
 }
 
 func (ctx flowContext) Signed(x float64) float64 {
@@ -56,20 +56,28 @@ func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, err
 	}
 	conv := normalizeDayConvention(deal.DayConvention)
 
+	var rateSeries *indexSeries
+	if deal.RateType == RateFloat && deal.BaseIndicator != "" {
+		series, ok := indices[deal.BaseIndicator]
+		if !ok {
+			return flowContext{}, fmt.Errorf("float deal %d: index %q not loaded", deal.DealID, deal.BaseIndicator)
+		}
+		rateSeries = &series
+	}
+
 	ctx := flowContext{
 		StartDate:             start,
 		Remaining:             remaining,
 		DayConvention:         conv,
 		IsDeposit:             isDeposit,
-		Indices:               indices,
+		Indices:               rateSeries,
 	}
 
 	sched, err := buildSchedules(deal, ctx)
 	if err != nil {
-		return flowContext{}, nil
+		return flowContext{}, err
 	}
 
-	ctx.RateAt = makeRateAt(deal, sched, ctx.Indices)
 	ctx.schedules = sched
 
 	return ctx, nil

@@ -19,19 +19,19 @@ func buildSchedule(startPayRule, maturity, start time.Time, period string, ancho
 		if err != nil {
 			return nil, fmt.Errorf("buildShedule: %w", err)
 		} else if (next == cur) {
-			dates = append(dates, scheduleItem{Date: cur, Value: 0})
+			dates = append(dates, scheduleItem{Date: cur, Value: -1})
 			break
 		}
 
 		if !next.Before(maturity) {
 			if (len(dates) == 0) {
-				dates = append(dates, scheduleItem{Date: cur, Value: 0})
+				dates = append(dates, scheduleItem{Date: cur, Value: -1})
 			}
 			break
 		}
 		if (!next.Before(start)) {
 			if len(dates) == 0 {
-				dates = append(dates, scheduleItem{Date: cur, Value: 0})
+				dates = append(dates, scheduleItem{Date: cur, Value: -1})
 			}
 			dates = append(dates, scheduleItem{Date: next, Value: 0}) //добавляем только будущие даты
 		}

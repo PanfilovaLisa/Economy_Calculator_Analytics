@@ -10,35 +10,35 @@ import (
 	"time"
 )
 
-// indexPoint — одна точка истории индекса.
+//одна точка истории индекса
 type indexPoint struct {
 	Date time.Time
 	Rate float64
 }
 
-// indexSeries — отсортированная по дате история индекса.
+// отсортированная по дате история индекса
 type indexSeries struct {
 	Points []indexPoint
 }
 
-// rateAt — ставка индекса на дату t: значение последней точки <= t.
-// Если t раньше первой точки — возвращает первую (лучше, чем 0).
-// Если история пуста — ok = false.
+// ставка индекса на дату t: значение последней точки <= t
+// Если t раньше первой точки - 0
+// Если история пуста - false
 func (s indexSeries) rateAt(t time.Time) (float64, bool) {
 	if len(s.Points) == 0 {
 		return 0, false
 	}
-	// бинарный поиск: первая точка с Date > t
+	//бинарный поиск: первая точка с Date > t
 	i := sort.Search(len(s.Points), func(i int) bool {
 		return s.Points[i].Date.After(t)
 	})
 	if i == 0 {
-		return s.Points[0].Rate, true
+		return 0, true
 	}
 	return s.Points[i-1].Rate, true
 }
 
-// loadIndexSeries — читает файл "дата;ставка" с комментариями через '#'.
+//читает файл "дата;ставка"
 // Строки с ошибкой парсинга пропускаются (с логом через возвращаемую error-агрегацию).
 func loadIndexSeries(path string) (indexSeries, error) {
 	f, err := os.Open(path)
@@ -53,29 +53,20 @@ func loadIndexSeries(path string) (indexSeries, error) {
 	for sc.Scan() {
 		lineNo++
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" {
 			continue
 		}
 		parts := strings.SplitN(line, ";", 2)
 		if len(parts) != 2 {
-			return indexSeries{}, fmt.Errorf(
-				"loadIndexSeries: %s:%d: ожидается 'дата;ставка', получено %q",
-				path, lineNo, line,
-			)
+			return indexSeries{}, fmt.Errorf("loadIndexSeries: %s:%d: expected 'date;rate', got %q", path, lineNo, line)
 		}
 		dt, err := parseDate(strings.TrimSpace(parts[0]))
 		if err != nil {
-			return indexSeries{}, fmt.Errorf(
-				"loadIndexSeries: %s:%d: дата %q: %w",
-				path, lineNo, parts[0], err,
-			)
+			return indexSeries{}, fmt.Errorf("loadIndexSeries: %s:%d: date %q: %w", path, lineNo, parts[0], err)
 		}
 		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 		if err != nil {
-			return indexSeries{}, fmt.Errorf(
-				"loadIndexSeries: %s:%d: ставка %q: %w",
-				path, lineNo, parts[1], err,
-			)
+			return indexSeries{}, fmt.Errorf("loadIndexSeries: %s:%d: rate %q: %w", path, lineNo, parts[1], err)
 		}
 		points = append(points, indexPoint{Date: dt, Rate: rate})
 	}
@@ -89,10 +80,10 @@ func loadIndexSeries(path string) (indexSeries, error) {
 	return indexSeries{Points: points}, nil
 }
 
-// loadIndices — читает все известные индексы. Пока только CBKEY1M.
-// Возвращает map: имя индекса -> серия.
-// Отсутствие файла — не фатально: индекс просто не будет найден,
-// и FLOAT-сделки с этим индексом упадут на базовую ставку (см. makeRateAt).
+//читает все известные индексы. Пока только CBKEY1M
+// Возвращает map: имя индекса -> серия
+// Отсутствие файла - не фатально: индекс просто не будет найден,
+// и FLOAT-сделки с этим индексом упадут на базовую ставку
 func loadIndices(dir string) map[string]indexSeries {
 	out := make(map[string]indexSeries)
 
@@ -100,8 +91,8 @@ func loadIndices(dir string) map[string]indexSeries {
 	if s, err := loadIndexSeries(cbkeyPath); err == nil {
 		out["CBKEY1M"] = s
 	} else {
-		// Не паникуем: без индекса FLOAT-сделки используют interest_rate.
-		// Логируем наверх через fmt — handler сам решит, печатать или нет.
+		// Логируем наверх через fmt - handler сам решит, печатать или нет
+		// потом переделать на log, когда добавиться
 		fmt.Printf("ВНИМАНИЕ: индекс CBKEY1M не загружен (%v); FLOAT-сделки с CBKEY1M будут использовать interest_rate\n", err)
 	}
 
