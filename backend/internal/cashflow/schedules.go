@@ -221,7 +221,6 @@ func buildFloatRepricing(deal Deal, ctx flowContext) ([]scheduleItem, error) {
     return nil, nil //ничего не задано
 }
 
-//вспомогательные-----------------------------------
 //из расписания тела делает расписание для процентов
 func principalToInterest(principal []scheduleItem) ([]scheduleItem) {
 	if principal == nil { return nil}
@@ -309,17 +308,4 @@ func getAnchor(dayNum *int, start *time.Time) (int, bool) {
 		return start.Day(), true
 	}
 	return 0, false
-}
-
-
-
-
-
-// ruleStart — вычисляет дату старта правила: max(ctx.StartDate, ruleStart).
-//можно просто передовать ctx.StartDate
-func ruleStart(ctx flowContext, rs *time.Time) time.Time {
-	if rs != nil && rs.After(ctx.StartDate) {
-		return *rs
-	}
-	return ctx.StartDate
 }
