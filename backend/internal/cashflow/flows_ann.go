@@ -90,7 +90,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 		case EvInterest:
 			// Проценты за интервал от prev до ev.Date с подынтервалами ставок
 			// проценты зависят от смены тела и репрайсинга
-			if fromInterest.IsZero() {
+			if fromInterest.IsZero() && it.j == 1 {
 				fromInterest = ev.Date
 				accruedInterestForInterest = 0
 				break
@@ -101,7 +101,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				rate := currentRate
 				accruedInterestForInterest += remaining * rate * yearFrac
 				
-				cfs = append(cfs, emitInterest(deal, ctx, fromInterest, ev.Date, roundMoney(accruedInterestForInterest), remaining))
+				cfs = append(cfs, emitInterest(deal, ctx, sched.Interest[it.j - 2].Date, ev.Date, roundMoney(accruedInterestForInterest), remaining))
 			}
 			fromInterest = ev.Date
 			accruedInterestForInterest = 0
@@ -109,7 +109,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 		case EvPrincipal:
 			// Накопленные проценты за интервал тела (от prevPrincipal до ev.Date)
 			// тело зависит от накопленный процентов за период тела, а они зависят от репрайсинга
-			if fromPrincipal.IsZero() {
+			if fromPrincipal.IsZero() && it.i == 1 {
 				fromPrincipal = ev.Date
 				accruedInterestOnPrincipal = 0
 				break
@@ -128,7 +128,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				principal = roundMoney(remaining)
 			}
 
-			if !fromInterest.IsZero() {
+			if !fromInterest.IsZero() && !fromInterest.Equal(ev.Date) {
 				//копим проценты для процентов по старому телу
 				yearFrac := YearFraction(fromInterest, ev.Date, ctx.DayConvention)
 				rate := currentRate
@@ -138,7 +138,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 
 			remaining -= principal
 
-			cfs = append(cfs, emitPrincipal(deal, ctx, fromPrincipal, ev.Date, principal, roundMoney(remaining)))
+			cfs = append(cfs, emitPrincipal(deal, ctx, sched.Principal[it.i - 2].Date, ev.Date, principal, roundMoney(remaining)))
 			
 
 			fromPrincipal = ev.Date
