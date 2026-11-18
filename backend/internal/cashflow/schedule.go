@@ -10,7 +10,7 @@ import (
 //есть два способа что делать если period > 1М и startPayRule.Day() < anchorDay: 
 // 1) первый платеж anchorDay в том же месяце (первый период короткий)
 // 2) первый платеж startPayRule + period в этом месяце в anchorDay (первый период длинный) <- делаем это
-func buildSchedule(startPayRule, maturity, start time.Time, period string, anchorDay int, isRepricing bool) ([]scheduleItem, error) {
+func buildSchedule(startPayRule, maturity, start time.Time, period string, anchorDay int) ([]scheduleItem, error) {
 	var dates []scheduleItem
 
 	cur := startPayRule
@@ -23,7 +23,7 @@ func buildSchedule(startPayRule, maturity, start time.Time, period string, ancho
 			break
 		}
 
-		if !next.Before(maturity) {
+		if next.After(maturity) {
 			if (len(dates) == 0) {
 				dates = append(dates, scheduleItem{Date: cur, Value: -1})
 			}
@@ -37,10 +37,7 @@ func buildSchedule(startPayRule, maturity, start time.Time, period string, ancho
 		}
 		cur = next
 	}
-	if !isRepricing {
-		//maturity не нужно добавлять для repricing
-		dates = append(dates, scheduleItem{Date: maturity, Value: 0}) //maturity должен быть всегда, но один, без другого close payment
-	}
+	//maturity не нужно добавлять, он добавляется в функциях только там где нужно
 	return dates, nil
 }
 

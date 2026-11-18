@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"analytics/configs"
+	"errors"
+	"log"
 )
 
 type CashFlowHandlerDeps struct {
@@ -51,32 +53,24 @@ func (handler *CashFlowHandler) Calculate() http.HandlerFunc {
 
 		// Генерируем денежные потоки
 		var allCashFlows []CashFlow
+		var dealErrs []*DealError
+
 		for _, deal := range deals {
-			flows := handler.CashFlowService.GenerateCashFlows(deal)
+			flows, err := handler.CashFlowService.GenerateCashFlows(deal)
+			if err != nil {
+				var de *DealError
+				if errors.As(err, &de) {
+					dealErrs = append(dealErrs, de)
+					log.Printf("deal %d skipped: %v", de.DealID, de.Err)
+					continue
+				}
+				http.Error(w, "internal: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 			allCashFlows = append(allCashFlows, flows...)
 		}
 
 		fmt.Printf("Всего сгенерировано строк CashFlow: %d\n", len(allCashFlows))
-		
-		for i, cf := range allCashFlows {
-			if (i < 10 || i > len(allCashFlows) - 10) {
-				fmt.Printf(
-					"Load: %s | Src: %s | DealID: %d | Curr: %s | Start: %s | PayDate: %s | Days: %d | Bucket: %s | Type: %s | Prin: %.2f | Int: %.2f | RemBal: %.2f\n",
-					cf.LoadDate.Format("2006-01-02 15:04:05"),
-					cf.SourceCode,
-					cf.DealID,
-					cf.Currency,
-					cf.StartDate.Format("02.01.2006"),
-					cf.PaymentDate.Format("02.01.2006"),
-					cf.DaysToPayment,
-					cf.TimeBucket,
-					cf.PaymentType,
-					cf.PrincipalAmount,
-					cf.InterestAmount,
-					cf.RemainingBalance,
-				)
-			}
-		}
 
 		err = SaveToCSV(allCashFlows, "../history", fileHeader.Filename)
 		if err != nil {
@@ -85,6 +79,9 @@ func (handler *CashFlowHandler) Calculate() http.HandlerFunc {
 
 		// Отвечаем пользователю
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"status": "success", "deals_loaded": %d, "cashflows_generated": %d}`, len(deals), len(allCashFlows))))
+		w.Write([]byte(fmt.Sprintf(
+			`{"status": "success", "deals_loaded": %d, "cashflows_generated": %d, "errors": %d}`,
+			len(deals), len(allCashFlows), len(dealErrs),
+		)))
 	}
 }

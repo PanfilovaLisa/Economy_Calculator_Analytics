@@ -7,6 +7,7 @@ import (
 	"strings"
 	"path/filepath"
 	"time"
+	"strconv"
 )
 
 func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
@@ -40,10 +41,10 @@ func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
 	defer writer.Flush()
 
 	headers := []string{
-		"load_dttm", "source_cd", "discriminator", "deal_id", "currency_cd",
-		"report_dttm",
-		"start_dttm", "payment_dttm", "days_to_payment", "time_bucket",
-		"payment_type", "principal_amt", "interest_amt", "remaining_balance",
+		"deal_id", "currency", "discriminator", "rate_type",
+		"report_dttm", "payment_type", "days_to_payment", "time_bucket", 
+		"start_dttm", "payment_dttm", "principal_amt", "interest_amt", "remaining_balance",
+		"prev_rate", "current_rate",
 	}
 	if err := writer.Write(headers); err != nil {
 		return err
@@ -51,21 +52,22 @@ func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
 
 	for _, cf := range flows {
 		record := []string{
-		cf.LoadDate.Format("2006-01-02 15:04:05"),
-		cf.SourceCode,
-		cf.Discriminator,
-		fmt.Sprintf("%d", cf.DealID),
-		cf.Currency,
-		cf.ReportDate.Format("02.01.2006"),
-		cf.StartDate.Format("02.01.2006"),
-		cf.PaymentDate.Format("02.01.2006"),
-		fmt.Sprintf("%d", cf.DaysToPayment),
-		cf.TimeBucket,
-		cf.PaymentType,
-		fmt.Sprintf("%.2f", cf.PrincipalAmount),
-		fmt.Sprintf("%.2f", cf.InterestAmount),
-		fmt.Sprintf("%.2f", cf.RemainingBalance),
-	}
+			fmt.Sprintf("%d", cf.DealID),
+			cf.Currency,
+			cf.Discriminator,
+			cf.RateType,
+			cf.ReportDate.Format("02.01.2006"),
+			cf.PaymentType,
+			fmt.Sprintf("%d", cf.DaysToPayment),
+			cf.TimeBucket,
+			cf.StartDate.Format("02.01.2006"),
+			cf.PaymentDate.Format("02.01.2006"),
+			strings.Replace(formatMoney(cf.PrincipalAmount), ".", ",", 1),
+			strings.Replace(formatMoney(cf.InterestAmount), ".", ",", 1),
+			strings.Replace(formatMoney(cf.RemainingBalance), ".", ",", 1),
+			strings.Replace(formatMoney(cf.PrevRate), ".", ",", 1),
+			strings.Replace(formatMoney(cf.CurrentRate), ".", ",", 1),
+		}
 		if err := writer.Write(record); err != nil {
 			return err
 		}
@@ -96,4 +98,8 @@ func sanitizeFileName(s string) string {
 		out = out[:60]
 	}
 	return out
+}
+
+func formatMoney(x float64) string {
+    return strconv.FormatFloat(x, 'f', 2, 64)
 }

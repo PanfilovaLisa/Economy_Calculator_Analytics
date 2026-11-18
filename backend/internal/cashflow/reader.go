@@ -48,10 +48,10 @@ func ReadDeals(file io.Reader) ([]Deal, error) {
 		}
 
 		if len(record) != len(headers) {
-		log.Printf("ВНИМАНИЕ: строка %d: len(record)=%d != len(headers)=%d, пропуск",
-			len(deals)+1, len(record), len(headers))
-		continue
-	}
+			log.Printf("ВНИМАНИЕ: строка %d: len(record)=%d != len(headers)=%d, пропуск",
+				len(deals)+1, len(record), len(headers))
+			continue
+		}
 
 		// Заполняем структуру Deal
 		deal := Deal{
@@ -85,9 +85,9 @@ func ReadDeals(file io.Reader) ([]Deal, error) {
 			RepricingRuleStart:    parseTimePtr(record[colIndex["repricing_rule_start_dttm"]]),
 			RepricingRulePeriod:   parseString(record[colIndex["repricing_rule_period_cd"]]),
 			RepricingRuleDayNum:   parseIntPtr(record[colIndex["repricing_rule_day_num"]]),
-			RepricingDttmSchedule: parseString(record[colIndex["repricing_dttm_schedule"]]),
-			RepricingRateSchedule: parseString(record[colIndex["repricing_dttm_rate_schedule"]]),
-			RepricingRateFixed:    parseString(record[colIndex["repricing_dttm_rate_schedule_fixed"]]),
+			RepricingDttmFloat: parseString(record[colIndex["repricing_dttm_schedule"]]),
+			RepricingRateFloat: parseString(record[colIndex["repricing_dttm_rate_schedule"]]),
+			RepricingRateFixed: parseString(record[colIndex["repricing_dttm_rate_schedule_fixed"]]),
 
 			Product:         parseString(record[colIndex["product"]]),
 			BehaviorModelCd: parseString(record[colIndex["behavior_model_cd"]]),
@@ -122,9 +122,28 @@ func ReadDeals(file io.Reader) ([]Deal, error) {
 	return deals, nil
 }
 
+// единая точка логирования ошибок парсинга
+// Позже сюда можно добавить сбор в []DealError или в контекст.
+func logParseError(field, raw, reason string) {
+    log.Printf("parse warning: field=%q value=%q: %s", field, raw, reason)
+}
+
 // удаляет лишние пробелы в начале и конце строки
 func parseString(s string) string {
 	return strings.TrimSpace(s)
+}
+
+//нормализация кодовых полей (ToUpper + TrimSpace) с валидацией
+// Поле field - для валидации и лога (например, "rate_type_cd")
+// Возвращает нормализованное значение (или исходное, если не распознано)
+func parseCode(field, s string) string {
+    raw := s
+    s = strings.ToUpper(strings.TrimSpace(s))
+    if s == "" {
+        logParseError(field, raw, "empty")
+        return ""
+    }
+    return s
 }
 
 // превращает строку "31.08.2022" в time.Time
@@ -149,10 +168,13 @@ func parseTimePtr(s string) *time.Time {
 	if s == "" {
 		return nil
 	}
-	t, err := time.Parse("02.01.2006", s)
-	if err != nil {
-		log.Printf("ВНИМАНИЕ: ошибка парсинга даты '%s': %v", s, err)
-		return nil
+	var t time.Time
+	var err error
+	if t, err = time.Parse("2006-01-02", s); err != nil {
+		if t, err = time.Parse("02.01.2006", s); err != nil {
+			log.Printf("ВНИМАНИЕ: ошибка парсинга даты '%s': %v", s, err)
+			return nil
+		}
 	}
 	return &t
 }

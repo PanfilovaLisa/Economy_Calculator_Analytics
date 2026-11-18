@@ -87,20 +87,22 @@ type Deal struct {
 }
 
 type CashFlow struct {
-	Discriminator string `json:"discriminator"`  // тип сделки
 	DealID     int       `json:"deal_id"`        // ID сделки (для join с Deal)
-	RateType string `json:"rate_type"`
 	Currency   string    `json:"currency_cd"`    // валюта
+	Discriminator string `json:"discriminator"`  // тип сделки
+	RateType string `json:"rate_type"`
 	ReportDate    time.Time `json:"report_dttm"` // дата отчёта: от неё считаются платежи
-
-	StartDate     time.Time `json:"start_dttm"`      // начало периода начисления (предыдущая дата платежа)
-	PaymentDate   time.Time `json:"payment_dttm"`    // дата платежа (конец периода)
+	PaymentType string `json:"payment_type"` // тип строки: principal/interest/prepayment/close
 	DaysToPayment int       `json:"days_to_payment"` // дней от report_dttm до payment_dttm
 	TimeBucket    string    `json:"time_bucket"`     // бакет (1d/1m/3m/.../30y)
-
-	PaymentType string `json:"payment_type"` // тип строки: principal/interest/prepayment/close
-
+ 
+	StartDate     time.Time `json:"start_dttm"`      // начало периода начисления (предыдущая дата платежа)
+	PaymentDate   time.Time `json:"payment_dttm"`    // дата платежа (конец периода)
 	PrincipalAmount  float64 `json:"principal_amt"`    // сумма тела (со знаком: + кредит, − депозит)
 	InterestAmount   float64 `json:"interest_amt"`     // сумма процентов (со знаком)
 	RemainingBalance float64 `json:"remaining_balance"` // остаток на момент события (для interest — до тела, для principal — после), со знаком
+
+	//оставляю эти поля только для repricing, но впринцепе можно записывать туда просто текущую ставку
+	PrevRate    float64     `json:"prev_rate"`    //поля для repricing, предыдущая ставка 
+	CurrentRate float64     `json:"current_rate"` // новая ставка, верная для всех платежей выше до следующего репрайсинга
 }
