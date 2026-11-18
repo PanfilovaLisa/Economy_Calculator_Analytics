@@ -47,14 +47,14 @@ func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
 
 	if principal == nil {
 		if deal.Discriminator == DiscSIMPLE {
-			principal = []scheduleItem{{ctx.StartDate, -1}} //enddate
+			principal = []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}} //enddate
 			pPeriod = "ENDDATE"
 		} else {
 			if interest != nil {
 				principal = interest
 				pPeriod = iPeriod
 			} else {
-				principal = []scheduleItem{{ctx.StartDate, -1}}
+				principal = []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}
 				pPeriod = "ENDDATE"
 			}
 		}
@@ -156,7 +156,7 @@ func buildPrincipal(deal Deal, ctx flowContext) ([]scheduleItem, string, error) 
 	//RegularPayStart если этого нет, то просто считаю, что правило не задано
 	if deal.RegularPayPeriod != "" && hasAnchor && deal.RegularPayStart != nil {
 		if deal.RegularPayPeriod == "ENDDATE" {
-			return []scheduleItem{{ctx.StartDate, -1}}, "ENDDATE", nil
+			return []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}, "ENDDATE", nil
 		}
 		dates, err := buildSchedule(*deal.RegularPayStart, deal.MaturityDate, ctx.StartDate, deal.RegularPayPeriod, anchorDay)
 		if err != nil {
@@ -195,7 +195,7 @@ func buildInterest(deal Deal, ctx flowContext) ([]scheduleItem, string, error) {
 	//InterestPayStart если этого нет, то просто считаю, что правило не задано
 	if deal.InterestPayPeriod != "" && hasAnchor && deal.InterestPayStart != nil {
 		if deal.InterestPayPeriod == "ENDDATE" {
-			return []scheduleItem{{ctx.StartDate, -1}}, "ENDDATE", nil
+			return []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}, "ENDDATE", nil
 		}
 		dates, err := buildSchedule(*deal.InterestPayStart, deal.MaturityDate, ctx.StartDate, deal.InterestPayPeriod, anchorDay)
 		if err != nil {
@@ -287,6 +287,7 @@ func buildFloatRepricing(deal Deal, ctx flowContext, start time.Time) ([]schedul
 			if err != nil {
 				return nil, "", fmt.Errorf("float_repricing: %w", err)
 			}
+			dates[0].Value = 0
 		}
 
 		//дальше ищем в cbkey ставки которые актуальны на дату и заполняем value

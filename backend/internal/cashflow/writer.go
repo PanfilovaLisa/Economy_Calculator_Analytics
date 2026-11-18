@@ -65,8 +65,8 @@ func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
 			strings.Replace(formatMoney(cf.PrincipalAmount), ".", ",", 1),
 			strings.Replace(formatMoney(cf.InterestAmount), ".", ",", 1),
 			strings.Replace(formatMoney(cf.RemainingBalance), ".", ",", 1),
-			strings.Replace(formatMoney(cf.PrevRate), ".", ",", 1),
-			strings.Replace(formatMoney(cf.CurrentRate), ".", ",", 1),
+			strings.Replace(strconv.FormatFloat(cf.PrevRate,'f', -1, 64), ".", ",", 1), // не нужно округлять проценты
+			strings.Replace(strconv.FormatFloat(cf.CurrentRate,'f', -1, 64), ".", ",", 1),
 		}
 		if err := writer.Write(record); err != nil {
 			return err

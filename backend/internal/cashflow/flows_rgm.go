@@ -55,9 +55,6 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			prevRate = currentRate
-
-			// Recast: пересчитать PMT от остатка и оставшихся платежей по новой ставке
-			// Оставшиеся платежи - все даты тела после текущей даты события
 			currentRate = ev.Value
 
 			if !fromRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
