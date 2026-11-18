@@ -30,9 +30,13 @@ func (s *CashFlowService) GenerateCashFlows(deal Deal) ([]CashFlow, error) {
             return nil, &DealError{DealID: deal.DealID, Err: err}
         }
         return res, nil
-    /*case DiscRGM:
-        return generateDifferentiatedFlows(deal, ctx)
-    case DiscSIMPLE:
+    case DiscRGM:
+        res, err := generateRGMFlows(deal, ctx)
+        if err != nil {
+            return nil, &DealError{DealID: deal.DealID, Err: err}
+        }
+        return res, nil
+    /*case DiscSIMPLE:
         return generateSimpleFlows(deal, ctx)*/
     default:
         return nil, &DealError{

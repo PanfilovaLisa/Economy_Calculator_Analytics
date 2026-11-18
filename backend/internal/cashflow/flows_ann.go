@@ -125,7 +125,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				principal = 0
 			}
 			if principal > remaining {
-				principal = remaining
+				principal = roundMoney(remaining)
 			}
 
 			if !fromInterest.IsZero() {
@@ -137,9 +137,8 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			remaining -= principal
-			remaining = roundMoney(remaining)
 
-			cfs = append(cfs, emitPrincipal(deal, ctx, fromPrincipal, ev.Date, principal, remaining))
+			cfs = append(cfs, emitPrincipal(deal, ctx, fromPrincipal, ev.Date, principal, roundMoney(remaining)))
 			
 
 			fromPrincipal = ev.Date
