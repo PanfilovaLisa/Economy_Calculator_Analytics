@@ -1,6 +1,7 @@
 package cashflow
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -10,150 +11,178 @@ import (
 	"time"
 )
 
-// читает CSV-файл и возвращает срез сделок
-func ReadDeals(file io.Reader) ([]Deal, error) {
-	reader := csv.NewReader(file)
-	// !Разделитель точка с запятой!
-	reader.Comma = ';'
-	reader.LazyQuotes = true // Нужно, чтобы парсер не падал на текстах
+var requiredDealCols = []string{
+	"report_dttm", "deal_id", "currency_id", "current_principal_amt",
+}
 
-	headers, err := reader.Read()
+func StreamDeals(ctx context.Context, r io.Reader, out chan<- Deal, maxRowErrs int) (rowErrs []error, err error) {
+	cr := csv.NewReader(r)
+	cr.Comma = ';'
+	cr.ReuseRecord = true
+	cr.FieldsPerRecord = -1
+
+	headers, err := cr.Read()
 	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения заголовков: %w", err)
+		return nil, fmt.Errorf("read header: %w", err)
 	}
-
-	// Создаем словарь: название колонки -> её индекс в строке
-	colIndex := make(map[string]int)
-	for i, header := range headers {
-		colIndex[strings.TrimSpace(header)] = i
+	col := make(map[string]int, len(headers))
+	for i, h := range headers {
+		col[strings.TrimSpace(h)] = i
 	}
-
-	// Проверяем наличие критически важных колонок, без которых парсинг невозможен
-	requiredCols := []string{"report_dttm", "deal_id", "currency_id", "current_principal_amt"}
-	for _, col := range requiredCols {
-		if _, ok := colIndex[col]; !ok {
-			return nil, fmt.Errorf("ошибка структуры CSV: отсутствует обязательная колонка '%s'", col)
+	for _, req := range requiredDealCols {
+		if _, ok := col[req]; !ok {
+			return nil, fmt.Errorf("missing required column %q", req)
 		}
 	}
 
-	deals := make([]Deal, 0, 1000)
+	for line := 2; ; line++ {
+		select {
+		case <-ctx.Done():
+			return rowErrs, ctx.Err()
+		default:
+		}
 
-	for {
-		record, err := reader.Read()
+		rec, err := cr.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("ошибка чтения строки: %w", err)
+			return rowErrs, fmt.Errorf("line %d: %w", line, err)
 		}
-
-		if len(record) != len(headers) {
-			log.Printf("ВНИМАНИЕ: строка %d: len(record)=%d != len(headers)=%d, пропуск",
-				len(deals)+1, len(record), len(headers))
+		if len(rec) != len(headers) {
+			if len(rowErrs) < maxRowErrs {
+				rowErrs = append(rowErrs, fmt.Errorf("line %d: field count %d != %d", line, len(rec), len(headers)))
+			}
 			continue
 		}
 
-		// Заполняем структуру Deal
-		deal := Deal{
-			ReportDate:      parseTime(record[colIndex["report_dttm"]]),
-			Discriminator:   parseString(record[colIndex["discriminator"]]),
-			DealID:          parseInt(record[colIndex["deal_id"]]),
-			Currency:        parseString(record[colIndex["currency_id"]]),
-			
-			StartPrincipalAmt:   parseFloatPtr(record[colIndex["start_principal_amt"]]),
-			CurrentPrincipalAmt: parseFloat(record[colIndex["current_principal_amt"]]),
+		d := dealFromRecord(rec, col)
 
-			DealDate:     parseTime(record[colIndex["deal_dttm"]]),
-			MaturityDate: parseTime(record[colIndex["maturity_dttm"]]),
-			DealReportDt: parseTime(record[colIndex["deal_report_dttm"]]),
-
-			RateType:          parseString(record[colIndex["rate_type_cd"]]),
-			InterestRate:      parseFloat(record[colIndex["interest_rate"]]),
-			BaseIndicator:     parseString(record[colIndex["base_indicator"]]),
-			BaseIndicatorRate: parseFloatPtr(record[colIndex["base_indicator_rate"]]),
-			DayConvention:     parseString(record[colIndex["day_convention_cd"]]),
-			AccruedInterest:   parseFloatPtr(record[colIndex["accrued_interest"]]),
-
-			InterestPayStart:  parseTimePtr(record[colIndex["interest_payment_rule_start_dttm"]]),
-			InterestPayPeriod: parseString(record[colIndex["interest_payment_rule_period_cd"]]),
-			InterestPayDayNum: parseIntPtr(record[colIndex["interest_payment_rule_day_num"]]),
-
-			RegularPayStart:  parseTimePtr(record[colIndex["regular_payment_rule_start_dttm"]]),
-			RegularPayPeriod: parseString(record[colIndex["regular_payment_rule_period_cd"]]),
-			RegularPayDayNum: parseIntPtr(record[colIndex["regular_payment_rule_day_num"]]),
-
-			RepricingRuleStart:    parseTimePtr(record[colIndex["repricing_rule_start_dttm"]]),
-			RepricingRulePeriod:   parseString(record[colIndex["repricing_rule_period_cd"]]),
-			RepricingRuleDayNum:   parseIntPtr(record[colIndex["repricing_rule_day_num"]]),
-			RepricingDttmFloat: parseString(record[colIndex["repricing_dttm_schedule"]]),
-			RepricingRateFloat: parseString(record[colIndex["repricing_dttm_rate_schedule"]]),
-			RepricingRateFixed: parseString(record[colIndex["repricing_dttm_rate_schedule_fixed"]]),
-
-			Product:         parseString(record[colIndex["product"]]),
-			BehaviorModelCd: parseString(record[colIndex["behavior_model_cd"]]),
-
-			ManualInterestPayment:  parseString(record[colIndex["interest_payment"]]),
-			ManualPrincipalPayment: parseString(record[colIndex["principal_payment"]]),
-
-			CapLimitInterestRate:   parseFloatPtr(record[colIndex["cap_limit_interest_rate"]]),
-			FloorLimitInterestRate: parseFloatPtr(record[colIndex["floor_limit_interest_rate"]]),
-
-			SubRateTypeCd:             parseString(record[colIndex["sub_rate_type_cd"]]),
-			SubInterestRate:           parseFloatPtr(record[colIndex["sub_interest_rate"]]),
-			SubFloatIndicator:         parseString(record[colIndex["sub_float_indicator"]]),
-			SubPaymentRulePeriodCd:    parseString(record[colIndex["sub_payment_rule_period_cd"]]),
-			SubPaymentRuleDayNum:      parseIntPtr(record[colIndex["sub_payment_rule_day_num"]]),
-			SubPaymentRuleStartDttm:   parseTimePtr(record[colIndex["sub_payment_rule_start_dttm"]]),
-			SubRepricingRuleStartDttm: parseTimePtr(record[colIndex["sub_repricing_rule_start_dttm"]]),
-			SubRepricingRulePeriodCd:  parseString(record[colIndex["sub_repricing_rule_period_cd"]]),
-			SubRepricingRuleDayNum:    parseIntPtr(record[colIndex["sub_repricing_rule_day_num"]]),
-			SubCapLimitInterestRate:   parseFloatPtr(record[colIndex["sub_cap_limit_interest_rate"]]),
-			SubFloorLimitInterestRate: parseFloatPtr(record[colIndex["sub_floor_limit_interest_rate"]]),
-			SubCoeffIndex:             parseFloatPtr(record[colIndex["sub_coeff_index"]]),
-			SubRepricingFirstEventFlg: parseIntPtr(record[colIndex["sub_repricing_rule_first_event_flg"]]),
-
-			IndicatorLagCd:    parseString(record[colIndex["indicator_lag_cd"]]),
-			SubIndicatorLagCd: parseString(record[colIndex["sub_indicator_lag_cd"]]),
+		select {
+		case out <- d:
+		case <-ctx.Done():
+			return rowErrs, ctx.Err()
 		}
+	}
+	return rowErrs, nil
+}
 
-		deals = append(deals, deal)
+func ReadDeals(r io.Reader) ([]Deal, error) {
+	ctx := context.Background()
+	ch := make(chan Deal, 256)
+	var deals []Deal
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for d := range ch {
+			deals = append(deals, d)
+		}
+	}()
+
+	rowErrs, err := StreamDeals(ctx, r, ch, 1000)
+	close(ch)
+	<-done
+
+	if len(rowErrs) > 0 {
+		log.Printf("ReadDeals: %d строк пропущено (первые: %v)", len(rowErrs), rowErrs[0])
+	}
+	return deals, err
+}
+
+func dealFromRecord(rec []string, col map[string]int) Deal {
+	get := func(name string) string {
+		if i, ok := col[name]; ok && i < len(rec) {
+			return rec[i]
+		}
+		return ""
 	}
 
-	return deals, nil
+	return Deal{
+		ReportDate:    parseTime(get("report_dttm")),
+		Discriminator: parseCode("discriminator", get("discriminator")),
+		DealID:        parseInt(get("deal_id")),
+		Currency:      parseString(get("currency_id")),
+
+		StartPrincipalAmt:   parseFloatPtr(get("start_principal_amt")),
+		CurrentPrincipalAmt: parseFloat(get("current_principal_amt")),
+
+		DealDate:     parseTime(get("deal_dttm")),
+		MaturityDate: parseTime(get("maturity_dttm")),
+		DealReportDt: parseTime(get("deal_report_dttm")),
+
+		RateType:          parseCode("rate_type_cd", get("rate_type_cd")),
+		InterestRate:      parseFloat(get("interest_rate")),
+		BaseIndicator:     parseString(get("base_indicator")),
+		BaseIndicatorRate: parseFloatPtr(get("base_indicator_rate")),
+		DayConvention:     parseString(get("day_convention_cd")),
+		AccruedInterest:   parseFloatPtr(get("accrued_interest")),
+
+		InterestPayStart:  parseTimePtr(get("interest_payment_rule_start_dttm")),
+		InterestPayPeriod: parseString(get("interest_payment_rule_period_cd")),
+		InterestPayDayNum: parseIntPtr(get("interest_payment_rule_day_num")),
+
+		RegularPayStart:  parseTimePtr(get("regular_payment_rule_start_dttm")),
+		RegularPayPeriod: parseString(get("regular_payment_rule_period_cd")),
+		RegularPayDayNum: parseIntPtr(get("regular_payment_rule_day_num")),
+
+		RepricingRuleStart:  parseTimePtr(get("repricing_rule_start_dttm")),
+		RepricingRulePeriod: parseString(get("repricing_rule_period_cd")),
+		RepricingRuleDayNum: parseIntPtr(get("repricing_rule_day_num")),
+		RepricingDttmFloat:  parseString(get("repricing_dttm_schedule")),
+		RepricingRateFloat:  parseString(get("repricing_dttm_rate_schedule")),
+		RepricingRateFixed:  parseString(get("repricing_dttm_rate_schedule_fixed")),
+
+		Product:         parseString(get("product")),
+		BehaviorModelCd: parseString(get("behavior_model_cd")),
+
+		ManualInterestPayment:  parseString(get("interest_payment")),
+		ManualPrincipalPayment: parseString(get("principal_payment")),
+
+		CapLimitInterestRate:   parseFloatPtr(get("cap_limit_interest_rate")),
+		FloorLimitInterestRate: parseFloatPtr(get("floor_limit_interest_rate")),
+
+		SubRateTypeCd:             parseString(get("sub_rate_type_cd")),
+		SubInterestRate:           parseFloatPtr(get("sub_interest_rate")),
+		SubFloatIndicator:         parseString(get("sub_float_indicator")),
+		SubPaymentRulePeriodCd:    parseString(get("sub_payment_rule_period_cd")),
+		SubPaymentRuleDayNum:      parseIntPtr(get("sub_payment_rule_day_num")),
+		SubPaymentRuleStartDttm:   parseTimePtr(get("sub_payment_rule_start_dttm")),
+		SubRepricingRuleStartDttm: parseTimePtr(get("sub_repricing_rule_start_dttm")),
+		SubRepricingRulePeriodCd:  parseString(get("sub_repricing_rule_period_cd")),
+		SubRepricingRuleDayNum:    parseIntPtr(get("sub_repricing_rule_day_num")),
+		SubCapLimitInterestRate:   parseFloatPtr(get("sub_cap_limit_interest_rate")),
+		SubFloorLimitInterestRate: parseFloatPtr(get("sub_floor_limit_interest_rate")),
+		SubCoeffIndex:             parseFloatPtr(get("sub_coeff_index")),
+		SubRepricingFirstEventFlg: parseIntPtr(get("sub_repricing_rule_first_event_flg")),
+
+		IndicatorLagCd:    parseString(get("indicator_lag_cd")),
+		SubIndicatorLagCd: parseString(get("sub_indicator_lag_cd")),
+	}
 }
 
-// единая точка логирования ошибок парсинга
-// Позже сюда можно добавить сбор в []DealError или в контекст.
 func logParseError(field, raw, reason string) {
-    log.Printf("parse warning: field=%q value=%q: %s", field, raw, reason)
+	log.Printf("parse warning: field=%q value=%q: %s", field, raw, reason)
 }
 
-// удаляет лишние пробелы в начале и конце строки
 func parseString(s string) string {
 	return strings.TrimSpace(s)
 }
 
-//нормализация кодовых полей (ToUpper + TrimSpace) с валидацией
-// Поле field - для валидации и лога (например, "rate_type_cd")
-// Возвращает нормализованное значение (или исходное, если не распознано)
 func parseCode(field, s string) string {
-    raw := s
-    s = strings.ToUpper(strings.TrimSpace(s))
-    if s == "" {
-        logParseError(field, raw, "empty")
-        return ""
-    }
-    return s
+	raw := s
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" {
+		logParseError(field, raw, "empty")
+		return ""
+	}
+	return s
 }
 
-// превращает строку "31.08.2022" в time.Time
 func parseTime(s string) time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}
 	}
-	
-	// Формат строго: ДД.ММ.ГГГГ
 	t, err := time.Parse("02.01.2006", s)
 	if err != nil {
 		log.Printf("ВНИМАНИЕ: ошибка парсинга даты '%s': %v", s, err)
@@ -162,7 +191,6 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-// превращает строку в *time.Time (если пусто или ошибка - nil)
 func parseTimePtr(s string) *time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -179,15 +207,12 @@ func parseTimePtr(s string) *time.Time {
 	return &t
 }
 
-// превращает строку в float64 (если пусто - 0.0, при ошибке логирует)
 func parseFloat(s string) float64 {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0.0
 	}
-	// Защита от запятых в числах ("3646037,89")
 	s = strings.Replace(s, ",", ".", -1)
-	
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		log.Printf("ВНИМАНИЕ: ошибка парсинга числа '%s': %v", s, err)
@@ -196,14 +221,12 @@ func parseFloat(s string) float64 {
 	return f
 }
 
-// превращает строку в *float64 (если пусто или ошибка - nil)
 func parseFloatPtr(s string) *float64 {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
-	s = strings.Replace(s, ",", ".", -1) // Защита от запятых
-	
+	s = strings.Replace(s, ",", ".", -1)
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		log.Printf("ВНИМАНИЕ: ошибка парсинга числа '%s': %v", s, err)
@@ -212,7 +235,6 @@ func parseFloatPtr(s string) *float64 {
 	return &f
 }
 
-// превращает строку в int (если пусто - 0, при ошибке логирует)
 func parseInt(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -226,7 +248,6 @@ func parseInt(s string) int {
 	return i
 }
 
-// превращает строку в *int (если пусто или ошибка - nil)
 func parseIntPtr(s string) *int {
 	s = strings.TrimSpace(s)
 	if s == "" {
