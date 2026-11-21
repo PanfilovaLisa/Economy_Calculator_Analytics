@@ -15,6 +15,7 @@ var cashFlowHeaders = []string{
 	"report_dttm", "payment_type", "days_to_payment", "time_bucket",
 	"start_dttm", "payment_dttm", "principal_amt", "interest_amt", "remaining_balance",
 	"prev_rate", "current_rate",
+	"sub_rate_type", "sub_interest_amt", "sub_prev_rate", "sub_current_rate",
 }
 
 type CSVWriter struct {
@@ -99,8 +100,13 @@ func cashFlowRecord(cf CashFlow) []string {
 		fmtMoney(cf.PrincipalAmount),
 		fmtMoney(cf.InterestAmount),
 		fmtMoney(cf.RemainingBalance),
-		strings.Replace(strconv.FormatFloat(cf.PrevRate,'f', -1, 64), ".", ",", 1), // не нужно округлять проценты
-		strings.Replace(strconv.FormatFloat(cf.CurrentRate,'f', -1, 64), ".", ",", 1),
+		fmtRate(cf.PrevRate),
+		fmtRate(cf.CurrentRate),
+		
+		cf.SubRateType,
+		fmtMoney(cf.SubInterestAmount),
+		fmtRate(cf.SubPrevRate),
+		fmtRate(cf.SubCurrentRate),
 	}
 }
 
@@ -145,4 +151,8 @@ func sanitizeFileName(s string) string {
 
 func fmtMoney(x float64) string {
 	return strings.Replace(strconv.FormatFloat(x, 'f', 2, 64), ".", ",", 1)
+}
+
+func fmtRate(x float64) string {
+	return strings.Replace(strconv.FormatFloat(x, 'f', -1, 64), ".", ",", 1)
 }

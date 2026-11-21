@@ -13,8 +13,10 @@ type flowContext struct {
 	IsDeposit             bool
 	RateAt                func(time.Time) float64
 	schedules             schedules
+	hasSub                bool //true - если есть sub
 	Indices               *indexSeries
-}
+	SubIndices            *indexSeries // у sub впринцепи может быть другой
+} 
 
 func (ctx flowContext) Signed(x float64) float64 {
 	if ctx.IsDeposit {
@@ -57,12 +59,20 @@ func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, err
 	conv := normalizeDayConvention(deal.DayConvention)
 
 	var rateSeries *indexSeries
+	var subRateSeries *indexSeries
 	if deal.RateType == RateFloat && deal.BaseIndicator != "" {
 		series, ok := indices[deal.BaseIndicator]
 		if !ok {
 			return flowContext{}, fmt.Errorf("float deal %d: index %q not loaded", deal.DealID, deal.BaseIndicator)
 		}
 		rateSeries = &series
+	}
+	if deal.SubRateTypeCd == RateFloat && deal.SubFloatIndicator != "" {
+		series, ok := indices[deal.SubFloatIndicator]
+		if !ok {
+			return flowContext{}, fmt.Errorf("float deal %d: sub index %q not loaded", deal.DealID, deal.SubFloatIndicator)
+		}
+		subRateSeries = &series
 	}
 
 	ctx := flowContext{
@@ -71,14 +81,16 @@ func prepareContext(deal Deal, indices map[string]indexSeries) (flowContext, err
 		DayConvention:         conv,
 		IsDeposit:             isDeposit,
 		Indices:               rateSeries,
+		SubIndices:            subRateSeries,
 	}
 
-	sched, err := buildSchedules(deal, ctx)
+	sched, hasSub, err := buildSchedules(deal, ctx)
 	if err != nil {
 		return flowContext{}, err
 	}
 
 	ctx.schedules = sched
+	ctx.hasSub = hasSub
 
 	return ctx, nil
 }

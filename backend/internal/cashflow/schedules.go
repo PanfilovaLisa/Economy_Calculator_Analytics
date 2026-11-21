@@ -26,6 +26,11 @@ type schedules struct {
 	Repricing  []scheduleItem //в Repricing и FixedSteps Value - это ставка на которую меняет в соответствующую дату
 	RepricingPeriod string
 	FixedSteps []scheduleItem
+
+	SubInterest   []scheduleItem
+	SubInterestPeriod string
+	SubRepricing  []scheduleItem
+	SubRepricingPeriod string
 }
 
 // собирает все расписания вместе
@@ -34,15 +39,15 @@ type schedules struct {
 // Если оба пусты -> [maturity] для обоих (не ошибка, просто вырожденный случай)
 // если enddate, то расписание тела = []scheduleItem{{ctx.StartDate, -1}} состоит только из этого так как {deal.MaturityDate, 0} - close payment
 // для процентов и репрайсинга []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}
-func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
+func buildSchedules(deal Deal, ctx flowContext) (schedules, bool, error) {
 	principal, pPeriod, err := buildPrincipal(deal, ctx)
 	if err != nil {
-		return schedules{}, err
+		return schedules{}, false, err
 	}
 
 	interest, iPeriod, err := buildInterest(deal, ctx)
 	if err != nil {
-		return schedules{}, err
+		return schedules{}, false, err
 	}
 
 	if principal == nil {
@@ -81,21 +86,44 @@ func buildSchedules(deal Deal, ctx flowContext) (schedules, error) {
 	var rPeriod string = ""
 	if deal.RateType == RateFloat {
 		repricing, rPeriod, err = buildFloatRepricing(deal, ctx, minAccrualStart)
-    	if err != nil { return schedules{}, err }
+    	if err != nil { return schedules{}, false, err }
 	} else { 
 		fixedRepricing, err = buildFixedRepricing(deal.MaturityDate, minAccrualStart, deal.RepricingRateFixed)
-		if err != nil { return schedules{}, err }
+		if err != nil { return schedules{}, false, err }
 	}
 
-	return schedules{
-		Principal:  principal,
-		PrincipalPeriod: pPeriod,
-		Interest:   interest,
-		InterestPeriod: iPeriod,
-		Repricing:  repricing,
-		RepricingPeriod: rPeriod,
-		FixedSteps: fixedRepricing,
-	}, nil
+	sched :=  schedules{
+			Principal:  principal,
+			PrincipalPeriod: pPeriod,
+			Interest:   interest,
+			InterestPeriod: iPeriod,
+			Repricing:  repricing,
+			RepricingPeriod: rPeriod,
+			FixedSteps: fixedRepricing,
+		}
+
+	subInterest, subIPeriod, err := buildSubInterest(deal, ctx)
+	if subInterest == nil {
+		return sched, false, nil
+	}
+	sched.SubInterest = subInterest
+	sched.SubInterestPeriod = subIPeriod
+
+	SubMinAccrualStart := principal[0].Date
+	if subInterest[0].Date.Before(SubMinAccrualStart) {
+		SubMinAccrualStart = subInterest[0].Date
+	}
+
+	var subRepricing []scheduleItem
+	var subRPeriod string
+	if deal.SubRateTypeCd == RateFloat {
+		subRepricing, subRPeriod, err = buildSubFloatRepricing(deal, ctx, SubMinAccrualStart)
+		if err != nil { return schedules{}, false, err }
+	}
+	sched.SubRepricing = subRepricing
+	sched.SubRepricingPeriod = subRPeriod
+
+	return sched, true, nil
 }
 
 func filterManual(manual []scheduleItem, maturity, start time.Time, isRepricing bool) ([]scheduleItem, error) {
@@ -313,6 +341,81 @@ func buildFloatRepricing(deal Deal, ctx flowContext, start time.Time) ([]schedul
 	}
 	raw := deal.InterestRate + idx   // маржа + индекс
 	dates[0].Value = clampRate(raw, deal.CapLimitInterestRate, deal.FloorLimitInterestRate)
+
+	return dates, "", nil
+}
+
+// строит расписание для sub-процентов
+func buildSubInterest(deal Deal, ctx flowContext) ([]scheduleItem, string, error) {
+	anchorDay, hasAnchor := getAnchor(deal.SubPaymentRuleDayNum, deal.SubPaymentRuleStartDttm)
+	//SubPaymentRuleStartDttm если этого нет, то просто считаю, что правило не задано
+	if deal.SubPaymentRulePeriodCd != "" && hasAnchor && deal.SubPaymentRuleStartDttm != nil {
+		if deal.SubPaymentRulePeriodCd == "ENDDATE" {
+			return []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}, "ENDDATE", nil
+		}
+		dates, err := buildSchedule(*deal.SubPaymentRuleStartDttm, deal.MaturityDate, ctx.StartDate, deal.SubPaymentRulePeriodCd, anchorDay)
+		if err != nil {
+			return nil, "", fmt.Errorf("sub_interest_payment: %w", err)
+		}
+		if !dates[len(dates)-1].Date.Equal(deal.MaturityDate) {
+			dates = append(dates, scheduleItem{Date: deal.MaturityDate, Value: 0})
+		}
+		return dates, deal.SubPaymentRulePeriodCd, nil
+	}
+	return nil, "", nil // ничего не задано
+}
+
+// строит расписание для sub-repricing (только по правилу)
+func buildSubFloatRepricing(deal Deal, ctx flowContext, start time.Time) ([]scheduleItem, string, error) {
+	anchorDay, hasAnchor := getAnchor(deal.SubRepricingRuleDayNum, deal.SubRepricingRuleStartDttm)
+	//SubRepricingRuleStartDttm если этого нет, то просто считаю, что правило не задано
+	if deal.SubRepricingRulePeriodCd != "" && hasAnchor && deal.SubRepricingRuleStartDttm != nil {
+		var dates []scheduleItem
+		var err error
+		if deal.SubRepricingRulePeriodCd == "ENDDATE" {
+			dates = []scheduleItem{{start, -1}, {deal.MaturityDate, 0}}
+		} else {
+			dates, err = buildSchedule(*deal.SubRepricingRuleStartDttm, deal.MaturityDate, start, deal.SubRepricingRulePeriodCd, anchorDay)
+			if err != nil {
+				return nil, "", fmt.Errorf("float_repricing: %w", err)
+			}
+			dates[0].Value = 0
+		}
+
+		coefIdx := 1.0
+		if deal.SubCoeffIndex != nil {
+			coefIdx = *deal.SubCoeffIndex
+		}
+
+		for i := range dates {
+			if i == 0 && dates[i].Value == -1 { continue }
+			idx, ok := ctx.SubIndices.rateAt(dates[i].Date)
+			if !ok {
+				break
+			}
+			raw := *deal.SubInterestRate + idx*coefIdx   // маржа + индекс * CoeffIndex
+            dates[i].Value = clampRate(raw, deal.SubCapLimitInterestRate, deal.SubFloorLimitInterestRate)
+		}
+
+		return dates, deal.SubRepricingRulePeriodCd, nil
+	}
+
+	dates := []scheduleItem{{start, 0}} //ничего не задано, поэтому делаем чтобы репрайсинг менялся только в дату начала
+
+	coefIdx := 1.0
+	if deal.SubCoeffIndex != nil {
+		coefIdx = *deal.SubCoeffIndex
+	}
+
+	idx, ok := ctx.SubIndices.rateAt(dates[0].Date)
+	if !ok {
+		idx = 0
+	}
+	if deal.SubInterestRate == nil {
+		return nil, "", fmt.Errorf("float_repricing: no SubInterestRate")
+	}
+	raw := *deal.SubInterestRate + idx*coefIdx  // маржа + индекс * CoeffIndex
+	dates[0].Value = clampRate(raw, deal.SubCapLimitInterestRate, deal.SubFloorLimitInterestRate)
 
 	return dates, "", nil
 }

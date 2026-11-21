@@ -10,6 +10,8 @@ const (
 	TypeClosePayment     = "close_payment"     // техническая строка закрытия сделки
 	TypeRepricing        = "repricing"         // переоценка ставки
 	TypeTimeBucketEnd    = "time_bucket_end"   // конец временного бакета
+	TypeSubInterestPayment  = "sub_interest_payment"  // платёж sub процентов
+	TypeSubRepricing        = "sub_repricing"         // переоценка sub ставки
 )
 
 // Типы сделок
@@ -105,4 +107,9 @@ type CashFlow struct {
 	//оставляю эти поля только для repricing, но впринцепе можно записывать туда просто текущую ставку
 	PrevRate    float64     `json:"prev_rate"`    //поля для repricing, предыдущая ставка 
 	CurrentRate float64     `json:"current_rate"` // новая ставка, верная для всех платежей выше до следующего репрайсинга
+
+	SubRateType string `json:"sub_rate_type"`
+	SubInterestAmount float64 `json:"sub_interest_amt"`
+	SubPrevRate  float64     `json:"sub_prev_rate"`
+	SubCurrentRate float64     `json:"sub_current_rate"`
 }

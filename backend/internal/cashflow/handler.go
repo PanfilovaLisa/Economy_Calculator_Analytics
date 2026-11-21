@@ -185,6 +185,10 @@ func (h *CashFlowHandler) Calculate() http.HandlerFunc {
 		}
 		mu.Unlock()
 
+		if err := SaveToCSV(all, "./../history", fh.Filename); err != nil {
+			h.log.Error("save csv failed", "err", err)
+		}
+
 		h.log.Info("calculate: done",
 			"file", fh.Filename,
 			"loaded", loaded,
