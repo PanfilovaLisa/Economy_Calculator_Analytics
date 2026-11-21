@@ -132,7 +132,6 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
 				rate := SubCurrentRate
 				accruedSubInterestForInterest += remaining * rate * yearFrac
-				fmt.Printf("%s-%s accruedSubInter %f\n", fromSubInterest, ev.Date, accruedSubInterestForInterest)
 				fromSubInterest = ev.Date
 			}
 
@@ -149,19 +148,16 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			if fromSubInterest.IsZero() && it.m == 1 {
 				fromSubInterest = ev.Date
 				accruedSubInterestForInterest = 0
-				fmt.Printf("%s-%s accruedSubInter %f\n", fromSubInterest, ev.Date, accruedSubInterestForInterest)
 				break
 			}
 
 			yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
 			rate := SubCurrentRate
 			accruedSubInterestForInterest += remaining * rate * yearFrac
-			fmt.Printf("%s-%s accruedSubInter %f\n", fromSubInterest, ev.Date, accruedSubInterestForInterest)
 			
 			cfs = append(cfs, emitSubInterest(deal, ctx, sched.SubInterest[it.m - 2].Date, ev.Date, roundMoney(accruedSubInterestForInterest), remaining))
 			fromSubInterest = ev.Date
 			accruedSubInterestForInterest = 0
-			fmt.Printf("%s-%s accruedSubInter %f\n", fromSubInterest, ev.Date, accruedSubInterestForInterest)
 
 		case EvPrincipal:
 			// Накопленные проценты за интервал тела (от prevPrincipal до ev.Date)
@@ -196,7 +192,6 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
 				rate := SubCurrentRate
 				accruedSubInterestForInterest += remaining * rate * yearFrac
-				fmt.Printf("%s-%s accruedSubInter %f\n", fromSubInterest, ev.Date, accruedSubInterestForInterest)
 				fromSubInterest = ev.Date
 			}
 
