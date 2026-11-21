@@ -198,14 +198,24 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			remaining -= principal
 
 			cfs = append(cfs, emitPrincipal(deal, ctx, sched.Principal[it.i - 2].Date, ev.Date, principal, roundMoney(remaining)))
-			
+			//
+			if prep := calcPrepayment(remaining, deal.BehaviorModelCd, fromPrincipal, ev.Date, ctx.DayConvention); prep > 0 {
+				remaining -= prep
+				cfs = append(cfs, emitPrepayment(deal, ctx, fromPrincipal, ev.Date, prep, roundMoney(remaining)))
+
+				remainingPayments := len(sched.Principal) - it.i
+				if remaining > 0 && remainingPayments > 0 {
+					pmt, err = calcAnnuityPMT(remaining, currentRate, remainingPayments, sched.PrincipalPeriod)
+					if err != nil {
+						return nil, fmt.Errorf("generateAnnFlows: %w", err)
+					}
+					pmt = roundMoney(pmt)
+				}
+			}
+			//
 
 			fromPrincipal = ev.Date
 			accruedInterestOnPrincipal = 0
-
-			if remaining <= 0 {
-				return cfs, nil
-			}
 		}
 	}
 

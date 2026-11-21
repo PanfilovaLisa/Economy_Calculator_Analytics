@@ -11,7 +11,7 @@ import (
 )
 
 var cashFlowHeaders = []string{
-	"deal_id", "currency", "discriminator", "rate_type",
+	"deal_id", "currency", "discriminator", "behavior_model_cd", "rate_type",
 	"report_dttm", "payment_type", "days_to_payment", "time_bucket",
 	"start_dttm", "payment_dttm", "principal_amt", "interest_amt", "remaining_balance",
 	"prev_rate", "current_rate",
@@ -90,6 +90,7 @@ func cashFlowRecord(cf CashFlow) []string {
 		strconv.Itoa(cf.DealID),
 		cf.Currency,
 		cf.Discriminator,
+		cf.BehaviorModelCd,
 		cf.RateType,
 		cf.ReportDate.Format("02.01.2006"),
 		cf.PaymentType,

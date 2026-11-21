@@ -92,6 +92,7 @@ type CashFlow struct {
 	DealID     int       `json:"deal_id"`        // ID сделки (для join с Deal)
 	Currency   string    `json:"currency_cd"`    // валюта
 	Discriminator string `json:"discriminator"`  // тип сделки
+	BehaviorModelCd string `json:"behavior_model_cd"`
 	RateType string `json:"rate_type"`
 	ReportDate    time.Time `json:"report_dttm"` // дата отчёта: от неё считаются платежи
 	PaymentType string `json:"payment_type"` // тип строки: principal/interest/prepayment/close

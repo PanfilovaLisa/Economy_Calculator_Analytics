@@ -158,7 +158,21 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 
 			remaining -= principal
 
-			cfs = append(cfs, emitPrincipal(deal, ctx, sched.Principal[it.i - 2].Date, ev.Date, principal, roundMoney(remaining)))
+			prevPrincipalDate := sched.Principal[it.i - 2].Date
+			cfs = append(cfs, emitPrincipal(deal, ctx, prevPrincipalDate, ev.Date, principal, roundMoney(remaining)))
+
+			//
+			if prep := calcPrepayment(remaining, deal.BehaviorModelCd, prevPrincipalDate, ev.Date, ctx.DayConvention); prep > 0 {
+				remaining -= prep
+				cfs = append(cfs, emitPrepayment(deal, ctx, prevPrincipalDate, ev.Date, prep, roundMoney(remaining)))
+
+				// Пересчитываем фиксированный платеж тела на оставшиеся периоды
+				remainingPayments := len(sched.Principal) - it.i
+				if remaining > 0 && remainingPayments > 0 {
+					fixedPrincipal = roundMoney(remaining / float64(remainingPayments))
+				}
+			}
+			//
 
 			fromPrincipal = ev.Date
 		}
