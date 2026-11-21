@@ -150,6 +150,7 @@ func buildPrincipal(deal Deal, ctx flowContext) ([]scheduleItem, string, error) 
 			}
 			return dates, "", nil
 		}
+		return []scheduleItem{{ctx.StartDate, -1}, {deal.MaturityDate, 0}}, "ENDDATE", nil
 	}
 
 	anchorDay, hasAnchor := getAnchor(deal.RegularPayDayNum, deal.RegularPayStart)
@@ -304,5 +305,14 @@ func buildFloatRepricing(deal Deal, ctx flowContext, start time.Time) ([]schedul
 		return dates, deal.RepricingRulePeriod, nil
 	}
 
-	return nil, "", nil //ничего не задано
+	dates := []scheduleItem{{start, 0}} //ничего не задано, поэтому делаем чтобы репрайсинг менялся только в дату начала
+
+	idx, ok := ctx.Indices.rateAt(dates[0].Date)
+	if !ok {
+		idx = 0
+	}
+	raw := deal.InterestRate + idx   // маржа + индекс
+	dates[0].Value = clampRate(raw, deal.CapLimitInterestRate, deal.FloorLimitInterestRate)
+
+	return dates, "", nil
 }

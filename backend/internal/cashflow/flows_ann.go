@@ -82,7 +82,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			if !fromRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
-				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, prevRate, currentRate))
+				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, roundRate(prevRate), roundRate(currentRate)))
 			}
 
 			fromRepricing = ev.Date
@@ -97,12 +97,10 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			yearFrac := YearFraction(fromInterest, ev.Date, ctx.DayConvention)
-			if yearFrac != 0 {
-				rate := currentRate
-				accruedInterestForInterest += remaining * rate * yearFrac
-				
-				cfs = append(cfs, emitInterest(deal, ctx, sched.Interest[it.j - 2].Date, ev.Date, roundMoney(accruedInterestForInterest), remaining))
-			}
+			rate := currentRate
+			accruedInterestForInterest += remaining * rate * yearFrac
+			
+			cfs = append(cfs, emitInterest(deal, ctx, sched.Interest[it.j - 2].Date, ev.Date, roundMoney(accruedInterestForInterest), remaining))
 			fromInterest = ev.Date
 			accruedInterestForInterest = 0
 

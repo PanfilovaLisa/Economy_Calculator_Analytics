@@ -12,6 +12,10 @@ func roundMoney(x float64) float64 {
     return math.Round(x*100) / 100
 }
 
+func roundRate(x float64) float64 {
+    return math.Round(x*10000) / 10000
+}
+
 //полная ставка до cap/floor: маржа + индекс (только для FLOAT с индексом)
 // Для FIXED просто interest_rate
 func fullRate(interestRate float64, indicatorRate *float64, rateType string) float64 {

@@ -4,9 +4,8 @@ import (
 	"time"
 )
 
-// аннуитет: фиксированный суммарный платёж,
-// тело = PMT − interest, последний платёж добивает остаток
-// close payment добавляется здесь
+// rgm: фиксированный платеж тела,
+// тело = remaning / n, n - оставшееся кол-во платежей тела
 func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 	sched := ctx.schedules
 
@@ -58,7 +57,7 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			currentRate = ev.Value
 
 			if !fromRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
-				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, prevRate, currentRate))
+				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, roundRate(prevRate), roundRate(currentRate)))
 			}
 
 			fromRepricing = ev.Date
@@ -71,12 +70,10 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			yearFrac := YearFraction(fromInterest, ev.Date, ctx.DayConvention)
-			if yearFrac != 0 {
-				rate := currentRate
-				accruedInterestForInterest += remaining * rate * yearFrac
-				
-				cfs = append(cfs, emitInterest(deal, ctx, sched.Interest[it.j - 2].Date, ev.Date, roundMoney(accruedInterestForInterest), remaining))
-			}
+			rate := currentRate
+			accruedInterestForInterest += remaining * rate * yearFrac
+			
+			cfs = append(cfs, emitInterest(deal, ctx, sched.Interest[it.j - 2].Date, ev.Date, roundMoney(accruedInterestForInterest), remaining))
 			fromInterest = ev.Date
 			accruedInterestForInterest = 0
 
