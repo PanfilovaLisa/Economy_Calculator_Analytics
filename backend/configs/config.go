@@ -1,30 +1,66 @@
 package configs
 
 import (
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Db DbConfig
+	Db     DbConfig
+	Server ServerConfig
+	Data   DataConfig
+	Output OutputConfig
 }
 
 type DbConfig struct {
 	Dsn string
 }
 
-func LoadConfig() *Config {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Println("Error loading .env file:", err.Error())
-		return nil
-	}
+type ServerConfig struct {
+	Addr           string
+	MaxUploadBytes int64
+	Workers        int
+}
 
-	return &Config{
+type DataConfig struct {
+	IndicesDir string
+}
+
+type OutputConfig struct {
+	Dir          string
+	DecimalComma bool
+}
+
+func LoadConfig() *Config {
+	_ = godotenv.Load(".env")
+
+	cfg := &Config{
 		Db: DbConfig{
 			Dsn: os.Getenv("DSN"),
 		},
+		Server: ServerConfig{
+			Addr:           getenv("HTTP_ADDR", ":8082"),
+			MaxUploadBytes: 32 << 20,
+			Workers:        4,
+		},
+		Data: DataConfig{
+			IndicesDir: getenv("INDICES_DIR", "./data"),
+		},
+		Output: OutputConfig{
+			Dir:          getenv("OUTPUT_DIR", "../history"),
+			DecimalComma: true,
+		},
 	}
+	if cfg.Db.Dsn == "" {
+		return nil
+	}
+	return cfg
+}
+
+func getenv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

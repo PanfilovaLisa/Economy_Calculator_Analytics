@@ -4,76 +4,119 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"strings"
 	"path/filepath"
-	"time"
 	"strconv"
+	"strings"
+	"time"
 )
 
-func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
-	err := os.MkdirAll(outputDir, os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("не удалось создать папку %s: %w", outputDir, err)
+var cashFlowHeaders = []string{
+	"deal_id", "currency", "discriminator", "rate_type",
+	"report_dttm", "payment_type", "days_to_payment", "time_bucket",
+	"start_dttm", "payment_dttm", "principal_amt", "interest_amt", "remaining_balance",
+	"prev_rate", "current_rate",
+}
+
+type CSVWriter struct {
+	f    *os.File
+	w    *csv.Writer
+	path string
+}
+
+func NewCSVWriter(dir, sourceName string) (*CSVWriter, error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	now := time.Now().Format("2006-01-02_15-04-05")
-
-	base := filepath.Base(sourceName)
-	base = strings.TrimSuffix(base, filepath.Ext(base))
+	now := time.Now().Format("2006-01-02_15-04-05.000")
+	base := strings.TrimSuffix(filepath.Base(sourceName), filepath.Ext(sourceName))
 	base = sanitizeFileName(base)
 
 	suffix := ""
 	if base != "" {
 		suffix = "_" + base
 	}
+	path := filepath.Join(dir, fmt.Sprintf("cashflows_%s%s.csv", now, suffix))
 
-	fileName := fmt.Sprintf("cashflows_%s%s.csv", now, suffix)
-	filePath := filepath.Join(outputDir, fileName)
-
-	file, err := os.Create(filePath)
+	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("не удалось создать файл: %w", err)
+		return nil, fmt.Errorf("create %s: %w", path, err)
 	}
-	defer file.Close()
 
-	writer := csv.NewWriter(file)
-	writer.Comma = ';'
-	defer writer.Flush()
+	w := csv.NewWriter(f)
+	w.Comma = ';'
 
-	headers := []string{
-		"deal_id", "currency", "discriminator", "rate_type",
-		"report_dttm", "payment_type", "days_to_payment", "time_bucket", 
-		"start_dttm", "payment_dttm", "principal_amt", "interest_amt", "remaining_balance",
-		"prev_rate", "current_rate",
+	if err := w.Write(cashFlowHeaders); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("write header: %w", err)
 	}
-	if err := writer.Write(headers); err != nil {
+
+	return &CSVWriter{f: f, w: w, path: path}, nil
+}
+
+func (w *CSVWriter) Path() string { return w.path }
+
+func (w *CSVWriter) WriteFlows(flows []CashFlow) error {
+	for _, cf := range flows {
+		if err := w.w.Write(cashFlowRecord(cf)); err != nil {
+			return fmt.Errorf("write row (deal %d): %w", cf.DealID, err)
+		}
+	}
+	return nil
+}
+
+func (w *CSVWriter) Close() error {
+	w.w.Flush()
+	flushErr := w.w.Error()
+
+	syncErr := w.f.Sync()
+	closeErr := w.f.Close()
+
+	if flushErr != nil {
+		return fmt.Errorf("flush: %w", flushErr)
+	}
+	if syncErr != nil {
+		return fmt.Errorf("sync: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close: %w", closeErr)
+	}
+	return nil
+}
+
+func cashFlowRecord(cf CashFlow) []string {
+	return []string{
+		strconv.Itoa(cf.DealID),
+		cf.Currency,
+		cf.Discriminator,
+		cf.RateType,
+		cf.ReportDate.Format("02.01.2006"),
+		cf.PaymentType,
+		strconv.Itoa(cf.DaysToPayment),
+		cf.TimeBucket,
+		cf.StartDate.Format("02.01.2006"),
+		cf.PaymentDate.Format("02.01.2006"),
+		strings.Replace(formatMoney(cf.PrincipalAmount), ".", ",", 1),
+    strings.Replace(formatMoney(cf.InterestAmount), ".", ",", 1),
+    strings.Replace(formatMoney(cf.RemainingBalance), ".", ",", 1),
+    strings.Replace(strconv.FormatFloat(cf.PrevRate,'f', -1, 64), ".", ",", 1), // не нужно округлять проценты
+    strings.Replace(strconv.FormatFloat(cf.CurrentRate,'f', -1, 64), ".", ",", 1),
+	}
+}
+
+func SaveToCSV(flows []CashFlow, outputDir string, sourceName string) error {
+	w, err := NewCSVWriter(outputDir, sourceName)
+	if err != nil {
 		return err
 	}
-
-	for _, cf := range flows {
-		record := []string{
-			fmt.Sprintf("%d", cf.DealID),
-			cf.Currency,
-			cf.Discriminator,
-			cf.RateType,
-			cf.ReportDate.Format("02.01.2006"),
-			cf.PaymentType,
-			fmt.Sprintf("%d", cf.DaysToPayment),
-			cf.TimeBucket,
-			cf.StartDate.Format("02.01.2006"),
-			cf.PaymentDate.Format("02.01.2006"),
-			strings.Replace(formatMoney(cf.PrincipalAmount), ".", ",", 1),
-			strings.Replace(formatMoney(cf.InterestAmount), ".", ",", 1),
-			strings.Replace(formatMoney(cf.RemainingBalance), ".", ",", 1),
-			strings.Replace(strconv.FormatFloat(cf.PrevRate,'f', -1, 64), ".", ",", 1), // не нужно округлять проценты
-			strings.Replace(strconv.FormatFloat(cf.CurrentRate,'f', -1, 64), ".", ",", 1),
-		}
-		if err := writer.Write(record); err != nil {
-			return err
-		}
+	if err := w.WriteFlows(flows); err != nil {
+		_ = w.Close()
+		return err
 	}
-
-	fmt.Printf("История сохранена в файл: %s\n", filePath)
+	if err := w.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("История сохранена в файл: %s\n", w.Path())
 	return nil
 }
 
@@ -100,6 +143,6 @@ func sanitizeFileName(s string) string {
 	return out
 }
 
-func formatMoney(x float64) string {
-    return strconv.FormatFloat(x, 'f', 2, 64)
+func fmtMoney(x float64) string {
+	return strings.Replace(strconv.FormatFloat(x, 'f', 2, 64), ".", ",", 1)
 }
