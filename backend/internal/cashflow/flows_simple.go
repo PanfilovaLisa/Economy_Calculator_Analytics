@@ -23,6 +23,18 @@ func generateSimpleFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 	}
 	initialRate =  roundRate(initialRate)
 
+	//начальная ставка для sub
+	var SubInitialRate float64 = 0
+	if ctx.hasSub {
+		SubInitialRate = clampRate(*deal.SubInterestRate, deal.SubCapLimitInterestRate, deal.SubFloorLimitInterestRate)
+		if deal.SubRateTypeCd == RateFloat{
+			if len(sched.SubRepricing) > 0 && sched.SubRepricing[0].Value != -1 {
+				SubInitialRate = sched.SubRepricing[0].Value
+			}
+		}
+		SubInitialRate =  roundRate(SubInitialRate)
+	}
+
 	remaining := ctx.Remaining
 
 	prevRate := 0.0
@@ -31,6 +43,12 @@ func generateSimpleFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 	fromInterest := time.Time{} // начало текущего процентного интервала, может меняться во время репрайсинга и тела
 	accruedInterestForInterest := 0.0
 	fromPrincipal := time.Time{} // начало текущего интервала тела
+
+	SubPrevRate := 0.0
+	SubCurrentRate := SubInitialRate
+	fromSubRepricing := time.Time{}
+	fromSubInterest := time.Time{} //может менятся от sub репрайсинга и тела
+	accruedSubInterestForInterest := 0.0 
 
 	var cfs []CashFlow
 
@@ -75,6 +93,42 @@ func generateSimpleFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			fromInterest = ev.Date
 			accruedInterestForInterest = 0
 
+		case SubEvRepricing:
+			if ev.Value == -1 {
+				fromSubRepricing = ev.Date
+				break 
+			}
+			if !fromSubInterest.IsZero() {
+				yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
+				rate := SubCurrentRate
+				accruedSubInterestForInterest += remaining * rate * yearFrac
+				fromSubInterest = ev.Date
+			}
+
+			SubPrevRate = SubCurrentRate
+			SubCurrentRate = roundRate(ev.Value)
+
+			if !fromSubRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
+				cfs = append(cfs, emitSubRepricing(deal, ctx, fromSubRepricing, ev.Date, remaining, SubPrevRate, SubCurrentRate))
+			}
+
+			fromSubRepricing = ev.Date
+
+		case SubEvInterest:
+			if fromSubInterest.IsZero() && it.m == 1 {
+				fromSubInterest = ev.Date
+				accruedSubInterestForInterest = 0
+				break
+			}
+
+			yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
+			rate := SubCurrentRate
+			accruedSubInterestForInterest += remaining * rate * yearFrac
+			
+			cfs = append(cfs, emitSubInterest(deal, ctx, sched.SubInterest[it.m - 2].Date, ev.Date, roundMoney(accruedSubInterestForInterest), remaining))
+			fromSubInterest = ev.Date
+			accruedSubInterestForInterest = 0
+
 		case EvPrincipal:
 			if fromPrincipal.IsZero() && it.i == 1 {
 				fromPrincipal = ev.Date
@@ -87,6 +141,12 @@ func generateSimpleFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 				rate := currentRate
 				accruedInterestForInterest += remaining * rate * yearFrac
 				fromInterest = ev.Date
+			}
+			if !fromSubInterest.IsZero() && !fromSubInterest.Equal(ev.Date) {
+				yearFrac := YearFraction(fromSubInterest, ev.Date, ctx.DayConvention)
+				rate := SubCurrentRate
+				accruedSubInterestForInterest += remaining * rate * yearFrac
+				fromSubInterest = ev.Date
 			}
 
 			var principal float64
