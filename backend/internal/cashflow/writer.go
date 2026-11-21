@@ -96,11 +96,11 @@ func cashFlowRecord(cf CashFlow) []string {
 		cf.TimeBucket,
 		cf.StartDate.Format("02.01.2006"),
 		cf.PaymentDate.Format("02.01.2006"),
-		fmtMoney(cf.PrincipalAmount),
-		fmtMoney(cf.InterestAmount),
-		fmtMoney(cf.RemainingBalance),
-		fmtMoney(cf.PrevRate),
-		fmtMoney(cf.CurrentRate),
+		strings.Replace(formatMoney(cf.PrincipalAmount), ".", ",", 1),
+    strings.Replace(formatMoney(cf.InterestAmount), ".", ",", 1),
+    strings.Replace(formatMoney(cf.RemainingBalance), ".", ",", 1),
+    strings.Replace(strconv.FormatFloat(cf.PrevRate,'f', -1, 64), ".", ",", 1), // не нужно округлять проценты
+    strings.Replace(strconv.FormatFloat(cf.CurrentRate,'f', -1, 64), ".", ",", 1),
 	}
 }
 

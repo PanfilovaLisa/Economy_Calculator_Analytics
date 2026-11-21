@@ -63,9 +63,9 @@ func emitPrincipal(
 	
 		StartDate: from,
 		PaymentDate: to,
-		PrincipalAmount: principal,
+		PrincipalAmount: ctx.Signed(principal),
 		InterestAmount: 0,
-		RemainingBalance: balanceAfter,
+		RemainingBalance:  ctx.Signed(balanceAfter),
 
 		PrevRate: 0,
 		CurrentRate: 0,
@@ -108,8 +108,8 @@ func emitInterest(
 		StartDate: from,
 		PaymentDate: to,
 		PrincipalAmount: 0,
-		InterestAmount: interest,
-		RemainingBalance: balanceAfter,
+		InterestAmount:  ctx.Signed(interest),
+		RemainingBalance:  ctx.Signed(balanceAfter),
 
 		PrevRate: 0,
 		CurrentRate: 0,
@@ -135,7 +135,7 @@ func emitRepricing(
 		PaymentDate: to,
 		PrincipalAmount: 0,
 		InterestAmount: 0,
-		RemainingBalance: balance,
+		RemainingBalance:  ctx.Signed(balance),
 
 		PrevRate: prevRate,
 		CurrentRate: curRate,
