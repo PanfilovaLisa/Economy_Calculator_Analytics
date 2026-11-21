@@ -24,6 +24,7 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			initialRate = sched.FixedSteps[0].Value
 		}
 	}
+	initialRate =  roundRate(initialRate)
 
 	remaining := ctx.Remaining
 	fixedPrincipal := roundMoney(remaining / float64(n))
@@ -54,10 +55,10 @@ func generateRGMFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			prevRate = currentRate
-			currentRate = ev.Value
+			currentRate = roundRate(ev.Value)
 
 			if !fromRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
-				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, roundRate(prevRate), roundRate(currentRate)))
+				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, prevRate, currentRate))
 			}
 
 			fromRepricing = ev.Date

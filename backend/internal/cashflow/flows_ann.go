@@ -27,6 +27,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			initialRate = sched.FixedSteps[0].Value
 		}
 	}
+	initialRate =  roundRate(initialRate)
 
 	// PMT от текущего остатка, числа платежей и ставки
 	remaining := ctx.Remaining
@@ -73,7 +74,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 
 			// Recast: пересчитать PMT от остатка и оставшихся платежей по новой ставке
 			// Оставшиеся платежи - все даты тела после текущей даты события
-			currentRate = ev.Value
+			currentRate = roundRate(ev.Value)
 			remainingPayments := countPrincipalAfter(sched.Principal, ev.Date)
 			if remainingPayments > 0 {
 				pmt, err = calcAnnuityPMT(remaining, currentRate, remainingPayments, sched.PrincipalPeriod)
@@ -82,7 +83,7 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			if !fromRepricing.IsZero() && !ev.Date.Before(ctx.StartDate) {
-				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, roundRate(prevRate), roundRate(currentRate)))
+				cfs = append(cfs, emitRepricing(deal, ctx, fromRepricing, ev.Date, remaining, prevRate, currentRate))
 			}
 
 			fromRepricing = ev.Date
