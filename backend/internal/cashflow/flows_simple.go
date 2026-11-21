@@ -161,7 +161,7 @@ func generateSimpleFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 
 			remaining -= principal
 
-			cfs = append(cfs, emitPrincipal(deal, ctx, sched.Principal[it.i - 2].Date, ev.Date, roundMoney(principal), roundMoney(remaining)))
+			cfs = append(cfs, emitPrepayment(deal, ctx, sched.Principal[it.i - 2].Date, ev.Date, roundMoney(principal), roundMoney(remaining)))
 
 			fromPrincipal = ev.Date
 		}
