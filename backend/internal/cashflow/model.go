@@ -114,3 +114,23 @@ type CashFlow struct {
 	SubPrevRate  float64     `json:"sub_prev_rate"`
 	SubCurrentRate float64     `json:"sub_current_rate"`
 }
+
+
+
+// valuation.Flow для CashFlow
+func (cf CashFlow) GetDealID() int {
+	return cf.DealID
+}
+
+func (cf CashFlow) GetPaymentDate() time.Time {
+	return cf.PaymentDate
+}
+
+func (cf CashFlow) GetReportDate() time.Time {
+	return cf.ReportDate
+}
+
+// возвращает полный денежный поток (тело + проценты + sub-проценты)
+func (cf CashFlow) GetPaymentAmount() float64 {
+	return cf.PrincipalAmount + cf.InterestAmount + cf.SubInterestAmount
+}

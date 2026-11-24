@@ -2,7 +2,6 @@ package cashflow
 
 import "time"
 
-// распределяет интервал в днях по регуляторным корзинам IRRBB
 func GetTimeBucket(days int) string {
 	switch {
 	case days <= 1:
@@ -46,7 +45,6 @@ func GetTimeBucket(days int) string {
 	}
 }
 
-// строка уменьшения тела
 func emitPrincipal(
 	deal Deal, ctx flowContext, from, to time.Time, principal, balanceAfter float64,
 	) CashFlow {
@@ -78,7 +76,6 @@ func emitPrincipal(
 	}
 }
 
-// досрочное погашение (ручной график SIMPLE)
 func emitPrepayment(
 	deal Deal, ctx flowContext, from, to time.Time, principal, balanceAfter float64,
 	) CashFlow {
@@ -87,7 +84,6 @@ func emitPrepayment(
 	return cf
 }
 
-// техническая строка закрытия (тело в maturity)
 func emitClose(
 	deal Deal, ctx flowContext, from, to time.Time, principal, balanceAfter float64,
 	) CashFlow {
@@ -96,7 +92,6 @@ func emitClose(
 	return cf
 }
 
-// строка процентов
 func emitInterest(
 	deal Deal, ctx flowContext, from, to time.Time, interest, balanceAfter float64,
 	) CashFlow {

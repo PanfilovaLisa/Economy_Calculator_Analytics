@@ -172,7 +172,6 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			rate := currentRate
 			accruedInterestOnPrincipal += remaining * rate * yearFrac
 
-			// Тело = PMT − проценты за период тела
 			principal := roundMoney(pmt - roundMoney(accruedInterestOnPrincipal))
 			if principal < 0 {
 				principal = 0
@@ -182,7 +181,6 @@ func generateAnnFlows(deal Deal, ctx flowContext) ([]CashFlow, error) {
 			}
 
 			if !fromInterest.IsZero() && !fromInterest.Equal(ev.Date) {
-				//копим проценты для процентов по старому телу
 				yearFrac := YearFraction(fromInterest, ev.Date, ctx.DayConvention)
 				rate := currentRate
 				accruedInterestForInterest += remaining * rate * yearFrac

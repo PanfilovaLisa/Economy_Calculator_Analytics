@@ -36,9 +36,6 @@ func clampRate(rate float64, capLimit, floorLimit *float64) float64 {
     return rate
 }
 
-// сколько периодов данного типа в году
-// "1M" -> 12, "3M" -> 4, "1Y" -> 1, "45D" -> 365/45
-// 0, nil возвращает если платим в maturity
 func periodsPerYear(period string) (float64, error) {
 	if period == "ENDDATE" {
 		return 0, nil
