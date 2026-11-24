@@ -7,6 +7,7 @@ import (
 
 	"analytics/configs"
 	"analytics/internal/cashflow"
+	"analytics/internal/handler"
 )
 
 func main() {
@@ -16,8 +17,10 @@ func main() {
 	}
 
 	router := http.NewServeMux()
+	
 	cashFlowService := cashflow.NewCashFlowService(conf)
-	cashflow.NewCashFlowHandler(router, cashflow.CashFlowHandlerDeps{
+	
+	handler.NewCashFlowHandler(router, handler.CashFlowHandlerDeps{
 		CashFlowService: cashFlowService,
 		Config:          conf,
 	})

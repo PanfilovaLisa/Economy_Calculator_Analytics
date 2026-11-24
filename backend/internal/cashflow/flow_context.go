@@ -15,7 +15,7 @@ type flowContext struct {
 	schedules             schedules
 	hasSub                bool //true - если есть sub
 	Indices               *indexSeries
-	SubIndices            *indexSeries // у sub впринцепи может быть другой
+	SubIndices            *indexSeries
 } 
 
 func (ctx flowContext) Signed(x float64) float64 {
