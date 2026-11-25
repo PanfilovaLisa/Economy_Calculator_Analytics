@@ -4,20 +4,24 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"analytics/configs"
 	"analytics/internal/cashflow"
+	"analytics/internal/valuation"
 	"analytics/pkg/response"
 )
 
 type CashFlowHandlerDeps struct {
 	CashFlowService *cashflow.CashFlowService
+	ValuationEngine *valuation.Engine
 	Config          *configs.Config
 	Logger          *slog.Logger
 }
 
 type CashFlowHandler struct {
 	svc       *cashflow.CashFlowService
+	valEngine *valuation.Engine
 	conf      *configs.Config
 	log       *slog.Logger
 	maxUpload int64
@@ -80,37 +84,64 @@ func (h *CashFlowHandler) Calculate() http.HandlerFunc {
 
 		h.log.Info("calculate: start", "file", fh.Filename, "size", fh.Size)
 
-		// вызов service
-		result, err := h.svc.ProcessPortfolio(r.Context(), file, fh.Filename)
+		var (
+			mu       sync.Mutex
+			allFlows []cashflow.CashFlow
+			totalPV  float64
+		)
+
+		testCurve := &valuation.FlatCurve{AnnualRate: 0.15}
+
+		onFlows := func(deal cashflow.Deal, flows []cashflow.CashFlow) error {
+			valFlows := make([]valuation.Flow, len(flows))
+			for i, cf := range flows {
+				valFlows[i] = cf
+			}
+
+			dealPV, err := h.valEngine.CalculatePV(valFlows, testCurve)
+			if err != nil {
+				return &cashflow.DealError{DealID: deal.DealID, Err: err}
+			}
+
+			mu.Lock()
+			totalPV += dealPV
+			allFlows = append(allFlows, flows...)
+			mu.Unlock()
+
+			return nil
+		}
+
+		stats, err := h.svc.ProcessPortfolio(r.Context(), file, onFlows)
 		if err != nil {
 			h.log.Error("process failed", "err", err)
 			response.Json(w, map[string]string{"error": "internal error"}, http.StatusInternalServerError)
 			return
 		}
 
+
 		h.log.Info("calculate: done",
 			"file", fh.Filename,
-			"loaded", result.Loaded,
-			"generated", len(result.Cashflows),
-			"errors", len(result.DealErrors),
-			"total_pv", result.TotalPV,
+			"loaded", stats.Loaded,
+			"generated", len(allFlows),
+			"errors", len(stats.DealErrors),
+			"total_pv", totalPV,
 		)
 
 		firstDeal := ""
-		if len(result.DealErrors) > 0 {
-			firstDeal = result.DealErrors[0].Error()
+		if len(stats.DealErrors) > 0 {
+			firstDeal = stats.DealErrors[0].Error()
 		}
 
 		response.Json(w, calcResponse{
 			Status:             "success",
-			DealsLoaded:        result.Loaded,
-			CashflowsGenerated: len(result.Cashflows),
-			Errors:             len(result.DealErrors),
-			RowErrors:          result.RowErrors,
+			DealsLoaded:        stats.Loaded,
+			CashflowsGenerated: len(allFlows),
+			Errors:             len(stats.DealErrors),
+			RowErrors:          stats.RowErrors,
 			FirstDealError:     firstDeal,
-			FirstRowError:      result.FirstRowError,
-			TotalPV:            result.TotalPV,
-			Cashflows:          result.Cashflows,
+			FirstRowError:      stats.FirstRowError,
+			TotalPV:            totalPV,
+			Cashflows:          allFlows,
 		}, http.StatusOK)
 	}
 }

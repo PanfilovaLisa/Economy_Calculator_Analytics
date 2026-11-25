@@ -8,10 +8,11 @@ import (
 	"sync"
 
 	"analytics/configs"
-	"analytics/internal/valuation"
 
 	"golang.org/x/sync/errgroup"
 )
+
+type FlowHandler func(deal Deal, flows []CashFlow) error
 
 type CashFlowService struct {
 	Config  *configs.Config
@@ -65,16 +66,13 @@ type Result struct {
 	TotalPV   float64
 }
 
-func (s *CashFlowService) ProcessPortfolio(ctx context.Context, file io.Reader, filename string) (*Result, error) {
+func (s *CashFlowService) ProcessPortfolio(ctx context.Context, file io.Reader, onFlows FlowHandler) (Stats, error) {
 	var (
-		mu       sync.Mutex
-		stats    Stats
-		all      []CashFlow
+		mu    sync.Mutex
+		stats Stats
 	)
 
 	dealsCh := make(chan Deal, s.Workers*2)
-	flowsCh := make(chan []CashFlow, s.Workers*2)
-
 	g, gctx := errgroup.WithContext(ctx)
 
 	// Producer
@@ -110,50 +108,26 @@ func (s *CashFlowService) ProcessPortfolio(ctx context.Context, file io.Reader, 
 					return err
 				}
 
-				select {
-				case flowsCh <- flows:
-				case <-gctx.Done():
-					return gctx.Err()
+				if onFlows != nil {
+					if err := onFlows(d, flows); err != nil {
+						var de *DealError
+						if errors.As(err, &de) {
+							mu.Lock()
+							stats.DealErrors = append(stats.DealErrors, de)
+							mu.Unlock()
+							continue
+						}
+						return fmt.Errorf("deal %d handler failed: %w", d.DealID, err)
+					}
 				}
 			}
 			return nil
 		})
 	}
 
-	go func() {
-		_ = g.Wait()
-		close(flowsCh)
-	}()
-
-	for flows := range flowsCh {
-		all = append(all, flows...)
-	}
-
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return stats, err
 	}
 
-	if err := SaveToCSV(all, "./../history", filename); err != nil {
-		fmt.Printf("WARN: save csv failed: %v\n", err)
-	}
-
-	// Вызываем Valuation
-	testCurve := &valuation.FlatCurve{AnnualRate: 0.15}
-	valEngine := valuation.NewEngine()
-
-	var valFlows []valuation.Flow
-	for _, cf := range all {
-		valFlows = append(valFlows, cf)
-	}
-
-	portfolioResult, err := valEngine.EvaluatePortfolio(valFlows, testCurve)
-	if err != nil {
-		return nil, fmt.Errorf("valuation failed: %w", err)
-	}
-
-	return &Result{
-		Stats:     stats,
-		Cashflows: all,
-		TotalPV:   portfolioResult.TotalPV,
-	}, nil
+	return stats, nil
 }
